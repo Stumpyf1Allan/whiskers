@@ -15,7 +15,9 @@ Two kinds of server, treated differently:
 
   On the phone there is no curl_cffi. The Android app hands these requests to the
   phone's own network engine instead (folio/android.py), which from Android 14 is the
-  one Chrome uses.
+  one Chrome uses. Every GET goes that way on the phone, not only Yahoo's: on the
+  emulator, FRED left Python's own connections hanging while the phone's engine, like
+  any other app's, got straight through.
 
 A machine with no internet should fail fast rather than sit through a dozen timeouts,
 so after several connection failures in a row everything short-circuits for a minute.
@@ -112,8 +114,8 @@ def get(url: str, *, timeout: float = 15.0, headers: dict | None = None,
         device = "phone" if android.fetch is not None else "computer"
         raise FetchError(f"This {device} seems to be offline — trying again shortly.", url=url)
     _pace(url)
-    if browser and android.fetch is not None:
-        return _get_android(url, timeout, headers)
+    if android.fetch is not None:
+        return _get_android(url, timeout, headers, browser)
     if browser and have_browser_tls():
         return _get_curl(url, timeout, headers)
     hdrs = {"User-Agent": BROWSER_UA if browser else "Whiskers (personal portfolio app)",
@@ -144,9 +146,10 @@ def get(url: str, *, timeout: float = 15.0, headers: dict | None = None,
         raise FetchError(f"Couldn't connect: {getattr(e, 'reason', e)}", url=url) from None
 
 
-def _get_android(url: str, timeout: float, headers: dict | None) -> bytes:
+def _get_android(url: str, timeout: float, headers: dict | None, browser: bool = True) -> bytes:
     """Through the phone's own network engine, with the same errors as everything else."""
-    hdrs = {"User-Agent": BROWSER_UA, "Accept": "application/json,text/csv,*/*;q=0.8",
+    hdrs = {"User-Agent": BROWSER_UA if browser else "Whiskers (personal portfolio app)",
+            "Accept": "application/json,text/csv,*/*;q=0.8",
             "Accept-Language": "en-GB,en;q=0.9"}
     hdrs.update(headers or {})
     try:

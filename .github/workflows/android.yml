@@ -126,6 +126,9 @@ jobs:
           bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$bt/aapt2" dump badging "out/Whiskers-$VERSION.apk" | grep -E "^(package|sdkVersion|targetSdkVersion|native-code)" | tee out/badging.txt
           "$bt/apksigner" verify --print-certs "out/Whiskers-$VERSION.apk" | tee out/signature.txt
+          # Google's signing tool, kept with the checks, so a build can be signed by hand
+          # with the Whiskers key if the secret is ever missing.
+          cp "$bt/lib/apksigner.jar" out/
           if [ "$SIGNED" = true ] && ! grep -qi "SHA-256 digest: $SIGNING_CERT_SHA256" out/signature.txt; then
             echo "::error title=Signature::The phone build isn't signed with the Whiskers key."
             exit 1
@@ -201,7 +204,7 @@ jobs:
             gh release create android-ci --draft --title "Android checks (not for download)" \
               --notes "Screenshots and logs from the latest Android emulator check. A draft, visible only to the repository's owner."
           fi
-          files=(apks/Whiskers-*.apk)
+          files=(apks/Whiskers-*.apk apks/apksigner.jar)
           [ -f emulator-check.zip ] && files+=(emulator-check.zip)
           gh release upload android-ci "${files[@]}" --clobber
 
@@ -247,7 +250,7 @@ jobs:
           # Keep the newest two builds.
           gh release view android --json assets --jq '.assets[].name' \
             | grep -E '^Whiskers-[0-9.]+\.apk$' | sort -V | head -n -2 \
-            | while read -r old; do gh release delete-asset android "$old" --yes; done
+            | while read -r old; do gh release delete-asset android "$old" --yes; done || true
           {
             echo "## Published Whiskers $VERSION for Android"
             echo

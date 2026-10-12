@@ -1043,6 +1043,9 @@ def test_on_the_phone_yahoo_goes_through_the_phones_own_engine(monkeypatch):
     url, headers, ms = fake.fetched[-1]
     assert headers["User-Agent"] == net.BROWSER_UA and ms == 9000
     assert net.have_browser_tls() and net.browser_tls_problem() is None
+    # Everything else goes the same way, as itself rather than as a browser.
+    assert net.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS") == b'{"chart": 1}'
+    assert fake.fetched[-1][1]["User-Agent"].startswith("Whiskers")
 
     fake.status, fake.body = 429, b"Too Many Requests"
     with pytest.raises(net.FetchError) as e:
