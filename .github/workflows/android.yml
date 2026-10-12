@@ -1,0 +1,255 @@
+# Build Whiskers for Allan's Android phone, check it on an emulator, and publish it on the
+# "android" pre-release, where the phone app looks for its own updates.
+#
+# WHY THIS EXISTS
+# The phone app is the same Python as the PC and Mac versions, run inside an Android app
+# by Chaquopy (see android/README.md). Android's build tools come from Google and GitHub's
+# machines have them, so the build happens here, like the Windows and Mac builds.
+#
+# WHEN IT RUNS
+#   - every push to main that changes the app (folio/), the Android shell, or this file;
+#   - by hand: Actions -> Android -> Run workflow.
+# Pushes to the android-app branch build and check without publishing.
+#
+# WHAT PUBLISHING MEANS
+# The phone build goes on a pre-release tagged "android", beside latest-android.json. The
+# phone app reads that file (config.ANDROID_UPDATE_MANIFEST_URL) and offers the update.
+# The family's copies read latest.json on the latest full release, which a pre-release
+# never becomes, so they never see a phone build.
+#
+# SIGNING
+# Every phone build must be signed with the same key, or Android refuses to install it
+# over the app already there (and the only way round that is uninstalling, which deletes
+# the phone's Whiskers data). The key lives in the ANDROID_SIGNING_KEY secret. A build
+# without it, or with any other key, is checked but never published.
+
+name: Android
+
+on:
+  push:
+    branches: [main, android-app]
+    paths:
+      - 'folio/**'
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The certificate every phone build has been signed with since the first one.
+  SIGNING_CERT_SHA256: ca628bd56bdb87e54e0ab6f2c7b6b4a53c43c41930653ce392026509906063a2
+
+jobs:
+
+  # ---------------------------------------------------------------- 1. build
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      signed: ${{ steps.key.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # Chaquopy compiles the app's Python with a Python of the same version as the
+      # phone's (3.13), so this one is used for the tests too.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Run every test first
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest PyYAML "openpyxl>=3.1" "cryptography>=41"
+          python -X warn_default_encoding -m pytest tests -q
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+
+      - id: v
+        name: Work out the phone build's number
+        run: |
+          base=$(python3 -c "import sys;sys.path.insert(0,'.');from folio import config;print(config.APP_VERSION)")
+          echo "version=$base.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Whiskers $base, phone build $GITHUB_RUN_NUMBER"
+
+      - id: key
+        name: Unpack the signing key
+        env:
+          KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::warning title=No signing key::The ANDROID_SIGNING_KEY secret isn't set, so this build is signed with a throwaway key and won't be published."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s' "$KEY" | tr -d ' \r\n\t' | base64 -d > "$RUNNER_TEMP/whiskers.p12"
+          got=$(keytool -list -v -keystore "$RUNNER_TEMP/whiskers.p12" -storetype pkcs12 \
+                  -storepass whiskers-android -alias whiskers 2>/dev/null \
+                | sed -n 's/.*SHA256: *//p' | tr -d ':' | tr 'A-F' 'a-f' | head -1)
+          if [ "$got" != "$SIGNING_CERT_SHA256" ]; then
+            echo "::error title=Wrong signing key::ANDROID_SIGNING_KEY holds a different key (certificate ${got:-unreadable}). A build signed with it couldn't update the app on the phone."
+            exit 1
+          fi
+          echo "WHISKERS_KEYSTORE=$RUNNER_TEMP/whiskers.p12" >> "$GITHUB_ENV"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build the copy for the emulator (debug, x86_64)
+        working-directory: android
+        run: bash ci/gradle.sh assembleDebug -PwhiskersAbis=x86_64
+
+      - name: Build the copy for the phone (release, arm64)
+        working-directory: android
+        run: bash ci/gradle.sh assembleRelease -PwhiskersAbis=arm64-v8a
+
+      - name: Collect them and check the signature
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          SIGNED: ${{ steps.key.outputs.signed }}
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk out/whiskers-test-x86_64.apk
+          cp android/app/build/outputs/apk/release/app-release.apk "out/Whiskers-$VERSION.apk"
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$bt/aapt2" dump badging "out/Whiskers-$VERSION.apk" | grep -E "^(package|sdkVersion|targetSdkVersion|native-code)" | tee out/badging.txt
+          "$bt/apksigner" verify --print-certs "out/Whiskers-$VERSION.apk" | tee out/signature.txt
+          if [ "$SIGNED" = true ] && ! grep -qi "SHA-256 digest: $SIGNING_CERT_SHA256" out/signature.txt; then
+            echo "::error title=Signature::The phone build isn't signed with the Whiskers key."
+            exit 1
+          fi
+          ls -l out
+          {
+            echo "## Whiskers $VERSION for Android"
+            echo
+            echo '```'
+            cat out/badging.txt
+            echo '```'
+            echo "Signed with the Whiskers key: $SIGNED"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apks
+          path: out/
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- 2. emulator
+  # Starts the app on an Android 14 emulator and drives it through its API: Python starts,
+  # the page loads, the key keeps other apps out, prices come in through the phone's own
+  # network engine, the spreadsheet export builds, and every screen draws.
+  emulator:
+    name: Check it on an emulator
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write          # to leave the screenshots on the draft release below
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: apks
+          path: apks
+
+      - name: Let the emulator use the processor's virtualisation
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run the app
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
+          script: bash android/ci/emulator-check.sh "$PWD/apks/whiskers-test-x86_64.apk" "$PWD/emulator"
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## On the emulator'; echo '```'; cat emulator/summary.txt 2>/dev/null || echo "no summary"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          cat emulator/summary.txt 2>/dev/null | sed 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}' | sed 's/^/::notice title=Emulator check::/' || true
+          echo
+
+      # Screenshots, logs and the phone build, on a DRAFT release: drafts are visible only
+      # to people who can push to the repository, so nothing here is public.
+      - name: Keep what it saw
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd emulator 2>/dev/null && zip -qr ../emulator-check.zip .) || echo "nothing to zip"
+          if ! gh release view android-ci >/dev/null 2>&1; then
+            gh release create android-ci --draft --title "Android checks (not for download)" \
+              --notes "Screenshots and logs from the latest Android emulator check. A draft, visible only to the repository's owner."
+          fi
+          files=(apks/Whiskers-*.apk)
+          [ -f emulator-check.zip ] && files+=(emulator-check.zip)
+          gh release upload android-ci "${files[@]}" --clobber
+
+  # ---------------------------------------------------------------- 3. publish
+  publish:
+    name: Publish for the phone
+    needs: [build, emulator]
+    if: needs.build.outputs.signed == 'true' && (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: android-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: apks
+          path: apks
+
+      - name: Write latest-android.json
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python3 android/ci/manifest.py "apks/Whiskers-$VERSION.apk" --version "$VERSION" \
+            --repo "$GITHUB_REPOSITORY" --notes "$(git log -1 --format=%s)"
+
+      - name: Put it on the Android pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          if ! gh release view android >/dev/null 2>&1; then
+            gh release create android --prerelease --title "Whiskers for Android" \
+              --notes-file android/RELEASE.md --target "$GITHUB_SHA"
+          fi
+          # The APK first, then the file that points at it, so nobody is ever pointed at a
+          # file that isn't there yet.
+          gh release upload android "apks/Whiskers-$VERSION.apk" --clobber
+          gh release upload android latest-android.json --clobber
+          # Keep the newest two builds.
+          gh release view android --json assets --jq '.assets[].name' \
+            | grep -E '^Whiskers-[0-9.]+\.apk$' | sort -V | head -n -2 \
+            | while read -r old; do gh release delete-asset android "$old" --yes; done
+          {
+            echo "## Published Whiskers $VERSION for Android"
+            echo
+            echo "https://github.com/$GITHUB_REPOSITORY/releases/download/android/Whiskers-$VERSION.apk"
+          } >> "$GITHUB_STEP_SUMMARY"

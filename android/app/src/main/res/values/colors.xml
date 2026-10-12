@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The page's own background and accent colours (ground and accent in styles.css). -->
+    <color name="ground">#F3F5F7</color>
+    <color name="ic_launcher_background">#0B6E6E</color>
+</resources>

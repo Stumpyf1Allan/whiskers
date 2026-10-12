@@ -109,6 +109,8 @@ def is_newer(candidate: str, current: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def platform_key() -> str:
+    if config.android():
+        return "android"
     if sys.platform.startswith("win"):
         return "windows"
     if sys.platform == "darwin":
@@ -164,10 +166,12 @@ def _state_file() -> pathlib.Path:
 
 
 def manifest_url() -> str:
-    """Where to look. A setting wins, then the environment, then the built-in default."""
+    """Where to look. A setting wins, then the environment, then the built-in default —
+    the phone app's own channel when this is the phone app."""
+    default = config.ANDROID_UPDATE_MANIFEST_URL if config.android() else config.UPDATE_MANIFEST_URL
     return (str(config.settings.get("update_url") or "").strip()
             or os.environ.get("WHISKERS_UPDATE_URL", "").strip()
-            or config.UPDATE_MANIFEST_URL).strip()
+            or default).strip()
 
 
 def _is_frozen() -> bool:

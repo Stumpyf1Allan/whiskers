@@ -23,14 +23,23 @@ const S = { boot: null, view: 'overview', period: { history: 1825, holding: 365,
 
 // On a phone the server answers only requests carrying this copy's key. The start-up
 // link carries it once, after the '#', a part of an address browsers never send to a
-// server; from then on Chrome keeps it for this app alone.
+// server; from then on Chrome (or the Android app's own browser) keeps it for this app
+// alone. The Android app may add the screen to open, as view=holdings.
 const KEY = (() => {
   const m = location.hash.match(/key=([0-9a-f]+)/);
   try {
-    if (m) { localStorage.setItem('whiskers-key', m[1]); history.replaceState(null, '', location.pathname); }
+    if (m) {
+      localStorage.setItem('whiskers-key', m[1]);
+      const v = location.hash.match(/view=([a-z]+)/);
+      history.replaceState(null, '', location.pathname + (v ? '#' + v[1] : ''));
+    }
     return localStorage.getItem('whiskers-key') || '';
   } catch (e) { return m ? m[1] : ''; }
 })();
+
+// Inside the Android app: a few words change, and files and links go through the phone.
+const onAndroid = () => !!(S.boot && S.boot.app && S.boot.app.android);
+const DEVICE = () => onAndroid() ? 'phone' : 'computer';
 
 async function api(path, opts = {}) {
   const init = { method: opts.method || 'GET', headers: {} };
@@ -257,8 +266,9 @@ function applyTheme() {
   const eff = effectiveTheme();
   const changed = document.documentElement.dataset.theme !== eff;
   document.documentElement.dataset.theme = eff;
-  const labels = { clock: 'Theme: by the clock', system: 'Theme: like the computer', light: 'Theme: light', dark: 'Theme: dark' };
+  const labels = { clock: 'Theme: by the clock', system: `Theme: like the ${DEVICE()}`, light: 'Theme: light', dark: 'Theme: dark' };
   $('#theme-btn').textContent = labels[S.boot.settings.theme || 'clock'];
+  if (window.WhiskersAndroid) { try { WhiskersAndroid.themeChanged(eff); } catch (e) { /* an older app */ } }
   return changed;
 }
 async function cycleTheme() {
@@ -326,14 +336,20 @@ async function checkUpdateBanner() {
   if (!u.show_banner) { b.hidden = true; return; }
   const ready = u.status === 'ready';
   b.innerHTML = `<span><b>Whiskers ${esc(u.latest)} is available.</b> ${esc(u.notes || '')}</span>` +
-    (ready ? `<button class="btn small primary" data-act="upd-reveal">Show the new version</button>`
+    (ready ? `<button class="btn small primary" data-act="upd-reveal">${onAndroid() ? 'Install it' : 'Show the new version'}</button>`
            : `<button class="btn small" data-act="upd-download">Download it</button>`) +
     `<button class="btn small ghost" data-act="upd-dismiss">Not now</button>`;
   b.hidden = false;
   wire(b);
 }
 ACTS['upd-download'] = async btn => { await busy(btn, () => api('/api/update/download', { method: 'POST' })); setTimeout(checkUpdateBanner, 4000); };
-ACTS['upd-reveal'] = () => api('/api/update/reveal', { method: 'POST' }).catch(e => toast(e.message, true));
+ACTS['upd-reveal'] = async () => {
+  try {
+    const r = await api('/api/update/reveal', { method: 'POST' });
+    if (r.android === 'allow') toast('Android needs your permission first: switch on \u201cAllow from this source\u201d for Whiskers, come back, then tap Install it again.');
+    else if (r.android && r.android !== 'started') toast(`The installer didn\u2019t open (${r.android}).`, true);
+  } catch (e) { toast(e.message, true); }
+};
 ACTS['upd-dismiss'] = async () => { await api('/api/update/dismiss', { method: 'POST', body: {} }); $('#update-banner').hidden = true; };
 
 // ============================================================================ Overview
@@ -1256,7 +1272,7 @@ async function vSettings(el) {
     <section class="panel"><h2>Where prices come from</h2>
       <p class="lede">Yahoo Finance\u2019s public charts for share prices, and FRED, the St. Louis Federal Reserve\u2019s free data service, for rates, credit spreads, the VIX and exchange rates. Neither needs an account.</p>
       <dl class="kv"><dt>Working</dt><dd>${d.sources.ok} of ${d.sources.total} series</dd>
-        <dt>Connection</dt><dd>${d.sources.browser_tls ? 'Browser-style (the most reliable with Yahoo)' : `Plain Python. It works, but Yahoo refuses it more readily than a browser-style connection. The browser-style one didn\u2019t load: ${esc(d.sources.browser_tls_problem || 'reason unknown')}`}</dd></dl>
+        <dt>Connection</dt><dd>${d.sources.browser_tls ? (onAndroid() ? 'Browser-style, through this phone\u2019s built-in Chrome engine (the most reliable with Yahoo)' : 'Browser-style (the most reliable with Yahoo)') : onAndroid() ? `This phone\u2019s standard connection: ${esc(d.sources.browser_tls_problem || '')}. Yahoo may refuse it now and then.` : `Plain Python. It works, but Yahoo refuses it more readily than a browser-style connection. The browser-style one didn\u2019t load: ${esc(d.sources.browser_tls_problem || 'reason unknown')}`}</dd></dl>
       ${d.sources.failing.length ? `<details style="margin-top:8px"><summary class="warnline">${plural(d.sources.failing.length, 'series', 'series')} not working</summary><table class="small" style="margin-top:6px"><tbody>${d.sources.failing.map(f => `<tr><td>${esc(f.key.replace(/^(REF|SEC|FX):/, ''))}</td><td class="muted">${esc(f.last_error)}</td><td class="muted nowrap">${f.last_ok ? `last worked ${ago(f.last_ok)}` : 'never worked'}</td></tr>`).join('')}</tbody></table></details>` : ''}
       <div class="row wrap" style="margin-top:12px;align-items:flex-end">
         <label class="field">Stooq key (optional back-up source)<input type="text" id="set-stooq" value="${esc(s.stooq_key || '')}" style="width:240px" placeholder="Not needed"></label>
@@ -1273,8 +1289,8 @@ async function vSettings(el) {
       <dl class="kv"><dt>Version</dt><dd>${esc(d.version)}</dd>
         <dt>Updates</dt><dd>${up ? updateWords(up) : 'Unknown'}</dd>
         <dt>Your data</dt><dd class="small">${esc(d.data_dir)}</dd>
-        <dt>Keys stored</dt><dd class="small">${d.vault === 'os-keychain' ? 'Encrypted, with the key in your computer\u2019s own credential store' : 'Encrypted in the data folder (no credential store was found on this computer)'}</dd></dl>
-      <div class="row wrap" style="margin-top:10px">${up && up.status !== 'off' ? '<button class="btn" data-act="upd-check">Check for an update</button>' : ''}<button class="btn" data-act="export-xlsx">Export to a spreadsheet</button><button class="btn" data-act="open-data">Open the data folder</button><button class="btn" data-act="tour">Take the tour</button>
+        <dt>Keys stored</dt><dd class="small">${onAndroid() ? 'Encrypted, in storage only the Whiskers app can read' : d.vault === 'os-keychain' ? 'Encrypted, with the key in your computer\u2019s own credential store' : 'Encrypted in the data folder (no credential store was found on this computer)'}</dd></dl>
+      <div class="row wrap" style="margin-top:10px">${up && up.status !== 'off' ? '<button class="btn" data-act="upd-check">Check for an update</button>' : ''}<button class="btn" data-act="export-xlsx">Export to a spreadsheet</button>${onAndroid() ? '' : '<button class="btn" data-act="open-data">Open the data folder</button>'}<button class="btn" data-act="tour">Take the tour</button>
         <label class="row small"><input type="checkbox" data-act="toggle-refresh" ${s.refresh_on_open ? 'checked' : ''}>Refresh when Whiskers opens</label></div>
       <p class="note" style="margin-top:6px">Export to a spreadsheet makes an Excel file of everything: your holdings, dividends, trades, cash movements and how you\u2019re allocated against your plan.</p>
     </section>
@@ -1347,7 +1363,7 @@ function t212Modal(id) {
     </div>
     <label class="field">API key<input type="password" id="t212-key" autocomplete="off" spellcheck="false"></label>
     <label class="field">Secret<input type="password" id="t212-secret" autocomplete="off" spellcheck="false"><span class="help">Older keys came without a secret; leave this blank if yours has none.</span></label>
-    <p class="note">The key is stored encrypted on this computer, with the encryption key in your operating system\u2019s own credential store. If a key is ever rejected, Whiskers says whether that is the key itself (401) or a missing read permission (403).</p>
+    <p class="note">${onAndroid() ? 'The key is stored encrypted on this phone, in storage only the Whiskers app can read.' : 'The key is stored encrypted on this computer, with the encryption key in your operating system\u2019s own credential store.'} If a key is ever rejected, Whiskers says whether that is the key itself (401) or a missing read permission (403).</p>
   </div>`, foot: `<button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="t212-save" data-id="${id}">Test and save the key</button>` });
 }
 ACTS['t212-key'] = b => t212Modal(+b.dataset.id);
@@ -1371,7 +1387,7 @@ function ftImport(id) {
     <p>Freetrade has no connection for apps, so Whiskers reads the activity file Freetrade lets you export.</p>
     <div class="steps">
       <div class="step"><div>In the Freetrade app, open <b>Activity</b> and use its export option to save your full history as a CSV file.</div></div>
-      <div class="step"><div>Get the file onto this computer: email it to yourself, or save it to your cloud drive.</div></div>
+      <div class="step"><div>${onAndroid() ? 'Save the file to this phone, for example to Downloads.' : 'Get the file onto this computer: email it to yourself, or save it to your cloud drive.'}</div></div>
       <div class="step"><div>Choose it below. Importing the same file again, or a newer one that overlaps, never counts anything twice.</div></div>
     </div>
     <button class="btn primary" data-act="ft-choose" data-id="${id}">Choose the file</button>
@@ -1435,27 +1451,40 @@ ACTS['sleeve-del'] = async b => {
   await api(`/api/sleeves/${b.dataset.id}`, { method: 'DELETE', body: {} }).catch(e => toast(e.message, true));
   render();
 };
+// Hands a file the server built to the person. In a browser or the PC's window that is a
+// download; inside the Android app a download link does nothing, so the file goes to the
+// app instead, which saves it in the phone's Downloads and says where.
+async function saveBlob(blob, name) {
+  if (window.WhiskersAndroid) {
+    const b64 = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(',')[1] || '');
+      r.onerror = () => reject(new Error('That file couldn\u2019t be read.'));
+      r.readAsDataURL(blob);
+    });
+    const said = String(WhiskersAndroid.saveFile(name, blob.type || 'application/octet-stream', b64));
+    if (said.startsWith('error:')) throw new Error(`The phone wouldn\u2019t save it: ${said.slice(6).trim()}`);
+    return said;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  return '';
+}
 ACTS['plan-export'] = async () => {
   try {
     const res = await api('/api/plan/export');
-    const blob = await res.blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'Whiskers plan.json';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    const said = await saveBlob(await res.blob(), 'Whiskers plan.json');
+    if (said) toast(said);
   } catch (e) { toast(e.message, true); }
 };
 ACTS['export-xlsx'] = async b => {
   await busy(b, async () => {
     const res = await api('/api/export/xlsx');
-    const blob = await res.blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${S.boot.app.name} export ${new Date().toISOString().slice(0, 10)}.xlsx`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-    toast('Downloaded.');
+    const said = await saveBlob(await res.blob(), `${S.boot.app.name} export ${new Date().toISOString().slice(0, 10)}.xlsx`);
+    toast(said || 'Downloaded.');
   });
 };
 ACTS['limits-save'] = async b => {
@@ -1672,7 +1701,7 @@ ACTS['monzo-connect'] = b => openModal({
     </ol>
     <label class="field">Client ID<input type="text" id="mz-id" placeholder="oauth2client_..."></label>
     <label class="field">Client secret<input type="password" id="mz-secret"></label>
-    <p class="small">Next, Monzo emails you a sign-in link. Open it on this computer, then approve the request in the Monzo app, then press Refresh.</p></div>`,
+    <p class="small">Next, Monzo emails you a sign-in link. Open it on this ${DEVICE()}, then approve the request in the Monzo app, then press Refresh.</p></div>`,
   foot: `<button class="btn primary" data-act="monzo-go" data-id="${b.dataset.id}">Save and go to Monzo</button>`,
 });
 ACTS['monzo-go'] = async b => {
@@ -1753,7 +1782,7 @@ const TOUR = [
   { title: 'Your plan against reality', view: 'allocation', target: '.bands', text: 'Each sleeve against its target. The tick is the target, the dot is where you are: green is fine, amber is drifting, red is outside its band. \u201cPut new money to work\u201d shows where a contribution would do most good.' },
   { title: 'Market watch', view: 'ai', target: '.monitor', text: 'Warning lights for markets in general, the economy, and the AI trade, each judged on a week\u2019s readings rather than one day. They describe what has already happened; none of them can predict what happens next.' },
   { title: 'Markets', view: 'markets', target: 'p.narrative', text: 'The indices, rates and commodities behind your holdings, each section with a short summary of what it is saying.' },
-  { title: 'Setting up', view: 'settings', target: '.panel', text: 'Connect Trading 212 with a read-only key, import Freetrade\u2019s activity file, add bank accounts and cards, and load or build your plan. Nothing leaves your computer.' },
+  { title: 'Setting up', view: 'settings', target: '.panel', text: () => `Connect Trading 212 with a read-only key, import Freetrade\u2019s activity file, add bank accounts and cards, and load or build your plan. Nothing leaves your ${DEVICE()}.` },
   { title: 'Keeping it up to date', target: '#refresh-btn', text: 'Refresh fetches the latest prices and updates any connected accounts. Whiskers also does this each time it opens.' },
   { title: 'Hide amounts', target: '#hide-btn', text: 'Blurs every pound figure, for when someone can see your screen. Percentages stay visible.' },
   { title: 'That\u2019s it', text: 'The Tour button in the sidebar, and Settings, bring this back any time. Nothing here is financial advice: Whiskers measures your portfolio against your own plan.' },
@@ -1813,7 +1842,7 @@ async function showTour() {
   const empty = !S.boot || !S.boot.platforms;
   card.innerHTML = `<div class="spread"><div class="tiny muted">${tourAt + 1} of ${TOUR.length}</div>
       <button class="btn ghost small" data-tour="end" aria-label="Close the tour" title="Close the tour (Esc)">\u2715</button></div>
-    <h3 id="tour-title" style="margin:2px 0 6px">${esc(st.title)}</h3><p class="small">${esc(st.text)}</p>
+    <h3 id="tour-title" style="margin:2px 0 6px">${esc(st.title)}</h3><p class="small">${esc(typeof st.text === 'function' ? st.text() : st.text)}</p>
     ${st.sample && empty ? '<p class="small" style="margin-top:8px">Nothing is set up yet, so the screens are empty. The sample portfolio fills them with made-up holdings, and comes out again in one click.</p>' : ''}
     <div class="row" style="margin-top:12px;justify-content:space-between">
       <button class="btn ghost small" data-tour="end">Skip the tour</button>
@@ -1879,6 +1908,15 @@ function endTour() {
 }
 
 ACTS.tour = () => startTour();
+
+// The phone's back button, asked by the Android app before it does anything itself:
+// close what is open, then step back to the overview, and only then leave the app.
+window.whiskersBack = () => {
+  if (tourAt >= 0) { endTour(); return true; }
+  if (!$('#modal').hidden) { closeModal(); return true; }
+  if (S.view !== 'overview') { go('overview'); return true; }
+  return false;
+};
 
 
 // ============================================================================ plan builder

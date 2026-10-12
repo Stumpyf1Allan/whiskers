@@ -34,6 +34,13 @@ UPDATE_MANIFEST_URL = (
     "https://github.com/Stumpyf1Allan/whiskers"
     "/releases/latest/download/latest.json")
 
+#: Where the Android app looks instead: a pre-release tagged "android" that the Android
+#: workflow refreshes after every phone build. Kept apart from latest.json so the family's
+#: Windows and Mac copies never see a phone build, and the phone never sees theirs.
+ANDROID_UPDATE_MANIFEST_URL = (
+    "https://github.com/Stumpyf1Allan/whiskers"
+    "/releases/download/android/latest-android.json")
+
 #: Mittens & Pence listens on 8765. A different number means both apps can be open at
 #: the same time, and the security checks in the server pin requests to our own port so
 #: one app's page can never post to the other.
@@ -131,10 +138,17 @@ def exports_dir() -> pathlib.Path:
     return p
 
 
+def android() -> bool:
+    """Running inside the Android app (android/ in this repository), which starts this
+    same Python and shows the page full-screen. What the phone itself can do is plugged
+    into folio.android at start-up."""
+    return os.environ.get("WHISKERS_ANDROID") == "1"
+
+
 def phone_mode() -> bool:
-    """Running on a phone (inside Termux). There, other apps share the loopback address,
-    so the API answers only requests carrying this copy's key."""
-    return os.environ.get("WHISKERS_PHONE") == "1"
+    """Running on a phone (the Android app, or Termux). There, other apps share the
+    loopback address, so the API answers only requests carrying this copy's key."""
+    return os.environ.get("WHISKERS_PHONE") == "1" or android()
 
 
 def phone_key() -> str:

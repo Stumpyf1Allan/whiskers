@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Whiskers</string>
+    <string name="starting">Starting Whiskers…</string>
+    <string name="starting_note">The first start after installing or updating takes a little longer.</string>
+    <string name="failed">Whiskers couldn\'t start</string>
+    <string name="page_failed">Whiskers started, but its page didn\'t load.</string>
+    <string name="try_again">Try again</string>
+</resources>

@@ -13,17 +13,24 @@ Two kinds of server, treated differently:
   build; if it is ever missing the app falls back to urllib and says so plainly when
   Yahoo refuses, rather than showing empty charts with no reason.
 
+  On the phone there is no curl_cffi. The Android app hands these requests to the
+  phone's own network engine instead (folio/android.py), which from Android 14 is the
+  one Chrome uses.
+
 A machine with no internet should fail fast rather than sit through a dozen timeouts,
 so after several connection failures in a row everything short-circuits for a minute.
 """
 
 from __future__ import annotations
 
+import base64
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from . import android
 
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/140.0 Safari/537.36")
@@ -85,6 +92,10 @@ def have_browser_tls() -> bool:
 def browser_tls_problem() -> str | None:
     """None when curl_cffi loads; otherwise the reason it didn't, word for word — a
     missing module in a built app and a failed install need different fixes."""
+    if android.fetch is not None:
+        return None if android.engine == "chromium" else (
+            "this phone has no built-in Chrome engine (Android 14 added one), so its "
+            "standard connection is used instead")
     try:
         import curl_cffi  # noqa: F401
         return None
@@ -98,6 +109,8 @@ def get(url: str, *, timeout: float = 15.0, headers: dict | None = None,
     if offline():
         raise FetchError("This computer seems to be offline — trying again shortly.", url=url)
     _pace(url)
+    if browser and android.fetch is not None:
+        return _get_android(url, timeout, headers)
     if browser and have_browser_tls():
         return _get_curl(url, timeout, headers)
     hdrs = {"User-Agent": BROWSER_UA if browser else "Whiskers (personal portfolio app)",
@@ -121,6 +134,27 @@ def get(url: str, *, timeout: float = 15.0, headers: dict | None = None,
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         _note_connection_failure()
         raise FetchError(f"Couldn't connect: {getattr(e, 'reason', e)}", url=url) from None
+
+
+def _get_android(url: str, timeout: float, headers: dict | None) -> bytes:
+    """Through the phone's own network engine, with the same errors as everything else."""
+    hdrs = {"User-Agent": BROWSER_UA, "Accept": "application/json,text/csv,*/*;q=0.8",
+            "Accept-Language": "en-GB,en;q=0.9"}
+    hdrs.update(headers or {})
+    try:
+        r = android.fetch(url, hdrs, timeout) or {}
+    except Exception as e:                     # whatever the Java side threw
+        r = {"error": f"{type(e).__name__}: {e}"}
+    if r.get("error") or r.get("status") is None:
+        _note_connection_failure()
+        raise FetchError(f"Couldn't connect: {r.get('error') or 'no answer'}", url=url)
+    _state["fails"] = 0
+    body = base64.b64decode(r.get("body") or "")
+    status = int(r["status"])
+    if status >= 400:
+        raise FetchError(f"HTTP {status} {body[:300].decode('utf-8', 'replace')}".strip(),
+                         status=status, url=url, headers=dict(r.get("headers") or {}))
+    return body
 
 
 def _get_curl(url: str, timeout: float, headers: dict | None) -> bytes:

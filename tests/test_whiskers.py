@@ -939,6 +939,192 @@ def test_the_phone_script_has_unix_line_endings():
     assert b"\r\n" not in raw and raw.startswith(b"#!/data/data/com.termux")
 
 
+# ============================================================================ the Android app
+
+ANDROID = ROOT / "android"
+BOOT = ANDROID / "app" / "src" / "main" / "python" / "whiskers_android.py"
+
+
+def _load(path: pathlib.Path, name: str, package: str | None = None):
+    """A module from a file, under its own name, so a test can use a fresh copy."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    if package:
+        mod.__package__ = package
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class _FakePhone:
+    """Stands in for Native.java: what the phone does when Python asks."""
+
+    def __init__(self, status=200, body=b"ok", engine="chromium", error=None):
+        self.status, self.body, self._engine, self.error = status, body, engine, error
+        self.fetched, self.opened, self.installed = [], [], []
+
+    def fetch(self, url, headers_json, timeout_ms):
+        self.fetched.append((url, json.loads(headers_json), timeout_ms))
+        if self.error:
+            return json.dumps({"error": self.error})
+        return json.dumps({"status": self.status, "headers": {"Content-Type": "text/plain"},
+                           "via": self._engine, "body": base64.b64encode(self.body).decode()})
+
+    def openUrl(self, url):                                  # noqa: N802 (Java's name)
+        self.opened.append(url)
+        return True
+
+    def installApk(self, path):                              # noqa: N802
+        self.installed.append(path)
+        return "started"
+
+    def engine(self):
+        return self._engine
+
+
+@pytest.fixture()
+def phone(monkeypatch):
+    """Python as the Android app starts it, with a fake Java side, restored afterwards."""
+    import sys
+    import tempfile
+    import types
+    from folio import android, main, updates
+    fake = _FakePhone()
+    java = types.ModuleType("java")
+    java.jclass = lambda name: fake
+    monkeypatch.setitem(sys.modules, "java", java)
+    for k in ("WHISKERS_ANDROID", "WHISKERS_PHONE", "TMPDIR"):
+        monkeypatch.setenv(k, "")
+        monkeypatch.delenv(k)
+    monkeypatch.setenv("WHISKERS_DATA_DIR", config.data_dir().as_posix())
+    monkeypatch.setattr(config, "APP_VERSION", config.APP_VERSION)
+    for a in ("fetch", "open_url", "install", "engine"):
+        monkeypatch.setattr(android, a, getattr(android, a))
+    monkeypatch.setattr(tempfile, "tempdir", tempfile.tempdir)
+    monkeypatch.setattr(main, "_setup_logging", lambda *a, **k: None)
+    monkeypatch.setattr(updates, "start_up", lambda *a, **k: None)
+    boot = _load(BOOT, "whiskers_android_under_test")
+    yield boot, fake
+    if boot._httpd:
+        boot._httpd.shutdown()
+        boot._httpd.server_close()
+
+
+def test_the_phone_app_starts_whiskers_and_lets_only_its_own_page_in(phone, tmp_path):
+    boot, fake = phone
+    url = boot.start(str(tmp_path / "files"), str(tmp_path / "cache"), "1.0.0.7")
+    assert boot.start("elsewhere", "elsewhere") == url              # a second window: same server
+    parsed = urllib.parse.urlparse(url)
+    key = parsed.fragment.removeprefix("key=")
+    assert parsed.hostname == "127.0.0.1" and re.fullmatch(r"[0-9a-f]{48}", key)
+    assert config.data_dir() == tmp_path / "files" / "whiskers"     # the app's private folder
+    assert config.android() and config.phone_mode()
+
+    assert _req(parsed.port, "/api/bootstrap")[0] == 401           # another app on the phone
+    status, body, _ = _req(parsed.port, "/api/bootstrap", headers={"X-Whiskers-Key": key})
+    app = json.loads(body)["app"]
+    assert status == 200 and app["android"] is True and app["version"] == "1.0.0.7"
+    assert _req(parsed.port, "/")[0] == 200                         # the page itself holds no data
+
+    # A web link opens in the phone's browser, not in the app's window.
+    status, body, _ = _req(parsed.port, "/api/open-url", "POST", body=b'{"url": "https://www.monzo.com"}',
+                           headers={"X-Whiskers-Key": key, "Content-Type": "application/json"})
+    assert status == 200 and json.loads(body)["opened"] and fake.opened == ["https://www.monzo.com"]
+
+
+def test_on_the_phone_yahoo_goes_through_the_phones_own_engine(monkeypatch):
+    """There's no curl_cffi on Android; the phone's built-in Chrome engine does its job."""
+    from folio import android
+    net = _load(ROOT / "folio" / "net.py", "folio.net_under_test", package="folio")
+    fake = _FakePhone(body=b'{"chart": 1}')
+    monkeypatch.setattr(android, "fetch", lambda u, h, t: json.loads(fake.fetch(u, json.dumps(h), int(t * 1000))))
+    monkeypatch.setattr(android, "engine", "chromium")
+    assert net.get("https://query1.finance.yahoo.com/v8/x", browser=True, timeout=9) == b'{"chart": 1}'
+    url, headers, ms = fake.fetched[-1]
+    assert headers["User-Agent"] == net.BROWSER_UA and ms == 9000
+    assert net.have_browser_tls() and net.browser_tls_problem() is None
+
+    fake.status, fake.body = 429, b"Too Many Requests"
+    with pytest.raises(net.FetchError) as e:
+        net.get("https://query1.finance.yahoo.com/v8/y", browser=True)
+    assert e.value.status == 429 and "Too Many Requests" in str(e.value)
+
+    fake.error = "UnknownHostException: no network"
+    with pytest.raises(net.FetchError) as e:
+        net.get("https://query1.finance.yahoo.com/v8/z", browser=True)
+    assert e.value.status is None and "no network" in str(e.value)
+
+    monkeypatch.setattr(android, "engine", "android")                # a phone older than Android 14
+    assert not net.have_browser_tls() and "Android 14" in net.browser_tls_problem()
+
+
+def test_the_phone_app_updates_from_its_own_channel(monkeypatch, tmp_path):
+    from folio import updates
+    assert updates.platform_key() != "android"
+    assert updates.manifest_url() == config.UPDATE_MANIFEST_URL     # the PC is unchanged
+    monkeypatch.setenv("WHISKERS_ANDROID", "1")
+    assert updates.platform_key() == "android"
+    assert updates.manifest_url() == config.ANDROID_UPDATE_MANIFEST_URL
+    assert "/releases/latest/" not in config.ANDROID_UPDATE_MANIFEST_URL  # never the family's file
+
+    # What the workflow publishes is what the phone app accepts.
+    apk = tmp_path / "Whiskers-1.0.0.12.apk"
+    apk.write_bytes(b"PK\x03\x04 not really an app")
+    out = tmp_path / "latest-android.json"
+    tool = _load(ANDROID / "ci" / "manifest.py", "android_manifest_under_test")
+    tool.main([str(apk), "--version", "1.0.0.12", "--repo", "Stumpyf1Allan/whiskers", "--out", str(out)])
+    manifest = json.loads(out.read_text(encoding="utf-8"))
+    entry = updates._download_entry(manifest, config.ANDROID_UPDATE_MANIFEST_URL)
+    assert entry and entry["filename"] == apk.name and entry["bytes"] == apk.stat().st_size
+    assert updates.is_newer(manifest["version"], "1.0.0.11") and not updates.is_newer("1.0.0.11", "1.0.0.12")
+
+
+def test_on_the_phone_a_downloaded_update_goes_to_androids_installer(server, monkeypatch, tmp_path):
+    from folio import android, updates
+    monkeypatch.setenv("WHISKERS_ANDROID", "1")
+    key = {"X-Whiskers-Key": config.phone_key(), "Content-Type": "application/json"}
+    apk = tmp_path / "Whiskers-1.0.0.12.apk"
+    apk.write_bytes(b"verified")
+    monkeypatch.setitem(updates._STATE, "file", str(apk))
+    fake = _FakePhone()
+    monkeypatch.setattr(android, "install", fake.installApk)
+    status, body, _ = _req(server, "/api/update/reveal", "POST", headers=key, body=b"{}")
+    assert status == 200 and json.loads(body) == {"opened": True, "android": "started"}
+    assert fake.installed == [str(apk)]
+    status, body, _ = _req(server, "/api/open-data-folder", "POST", headers=key, body=b"{}")
+    assert status == 200 and json.loads(body)["opened"] is False      # the app's folder is private
+
+
+def test_the_android_build_matches_the_project():
+    yaml = pytest.importorskip("yaml")
+    gradle = (ANDROID / "app" / "build.gradle.kts").read_text(encoding="utf-8")
+    # One version, read from folio/config.py; one copy of the app, copied in from folio/.
+    assert 'File(repoRoot, "folio/config.py")' in gradle and 'File(repoRoot, "folio")' in gradle
+    assert 'extractPackages("folio")' in gradle and 'version = "3.13"' in gradle
+    app_id = re.search(r'applicationId = "([^"]+)"', gradle).group(1)
+    java = ANDROID / "app" / "src" / "main" / "java" / pathlib.Path(*app_id.split("."))
+    assert (java / "MainActivity.java").exists() and (java / "Native.java").exists()
+    assert _load(BOOT, "whiskers_android_names").NATIVE == f"{app_id}.Native"
+    native = (java / "Native.java").read_text(encoding="utf-8")
+    for method in ("fetch(String url, String headersJson, int timeoutMs)", "openUrl(String url)",
+                   "installApk(String path)", "engine()"):
+        assert f"public static " in native and method in native, method
+    manifest = (ANDROID / "app" / "src" / "main" / "AndroidManifest.xml").read_text(encoding="utf-8")
+    assert "@xml/network_security_config" in manifest and 'android:allowBackup="false"' in manifest
+
+    flow = (ROOT / ".github" / "workflows" / "android.yml").read_text(encoding="utf-8")
+    yaml.safe_load(flow)
+    cert = re.search(r"SIGNING_CERT_SHA256: ([0-9a-f]{64})", flow)
+    assert cert, "the signing certificate must stay pinned"
+    assert "ANDROID_SIGNING_KEY" in flow and "latest-android.json" in flow
+    assert "android/ci/manifest.py" in flow and "android/ci/emulator-check.sh" in flow
+    assert not re.search(r"(?i)kestrel|mittens", flow)
+    for script in (ANDROID / "ci").glob("*.sh"):
+        assert b"\r\n" not in script.read_bytes(), script.name
+    rules = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    assert "*.sh       text eol=lf" in rules
+
+
 
 def test_the_build_leaves_one_whiskers_exe_and_a_shortcut_to_it():
     """PyInstaller's scratch folder held a Whiskers.exe that cannot run by itself

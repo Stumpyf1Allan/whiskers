@@ -22,7 +22,7 @@ import unicodedata
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .. import config, db, net, security, updates
+from .. import android, config, db, net, security, updates
 from ..brokers import freetrade, monzo, symbols, trading212
 from ..engine import (allocation, export, isa, mathx, narrative, plan, planbuilder, playbook, portfolio,
                       rules, sample, signals, stress)
@@ -86,7 +86,8 @@ def api_bootstrap(req, m, q, body):
     s = config.settings.all()
     return {
         "app": {"name": config.APP_NAME, "version": config.APP_VERSION,
-                "tagline": config.APP_TAGLINE, "fake_market": config.fake_market()},
+                "tagline": config.APP_TAGLINE, "fake_market": config.fake_market(),
+                "android": config.android()},
         "settings": {k: s.get(k) for k in ("user_name", "toured", "help_email", "isa_allowance",
                                            "fscs_limit", "refresh_on_open", "theme",
                                            "hide_amounts")},
@@ -481,7 +482,7 @@ def api_settings(req, m, q, body):
         "sources": {"ok": sum(1 for r in meta if r["last_ok"] and not r["last_error"]),
                     "failing": [r for r in meta if r["last_error"]][:40],
                     "total": len(meta), "browser_tls": net.have_browser_tls(),
-                    "browser_tls_problem": net.browser_tls_problem()},
+                    "browser_tls_problem": net.browser_tls_problem(), "engine": android.engine},
         "vault": security.storage_backend(), "data_dir": str(config.data_dir()),
         "version": config.APP_VERSION, "sample": sample.loaded(),
         "plan_loaded": db.get_meta("plan_loaded"),
@@ -866,7 +867,16 @@ def api_update_dismiss(req, m, q, body):
 def api_update_reveal(req, m, q, body):
     """Open the folder the verified download is in. The folder, never a path the page
     supplies: a route that opens whatever it is handed would run an .exe as happily
-    as it opens a folder."""
+    as it opens a folder.
+
+    On the phone there is no folder to show: the verified download goes straight to
+    Android's installer, which asks before it changes anything."""
+    if config.android():
+        f = updates.state().get("file")
+        if not f:
+            raise ApiError("Download the new version first.")
+        how = android.install(f) if android.install else "unavailable"
+        return {"opened": how == "started", "android": how}
     return _open_path(updates.downloads_dir())
 
 
@@ -878,6 +888,9 @@ def api_open_data(req, m, q, body):
 def _open_path(target: pathlib.Path) -> dict:
     import subprocess
     import sys
+    if config.android():
+        return {"opened": False, "path": str(target),
+                "problem": "On the phone, Whiskers' folder is private to the app."}
     try:
         if os.name == "nt":
             os.startfile(str(target))                # noqa: S606 — a folder we chose
@@ -897,6 +910,10 @@ def api_open_url(req, m, q, body):
         raise ApiError("Only web links and email addresses can be opened.")
     if any(ch in url for ch in "\r\n\x00"):
         raise ApiError("That link isn't valid.")
+    if config.android():
+        opened = bool(android.open_url and android.open_url(url))
+        return {"opened": True} if opened else {"opened": False, "url": url,
+                                               "problem": "Nothing on this phone could open it."}
     import webbrowser
     try:
         webbrowser.open(url)

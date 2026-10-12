@@ -1,0 +1,10 @@
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+# A signing key never goes in the repository: it lives in the ANDROID_SIGNING_KEY secret.
+*.jks
+*.p12
+*.keystore
