@@ -959,14 +959,15 @@ def _load(path: pathlib.Path, name: str, package: str | None = None):
 class _FakePhone:
     """Stands in for Native.java: what the phone does when Python asks."""
 
-    def __init__(self, status=200, body=b"ok", engine="chromium", error=None):
+    def __init__(self, status=200, body=b"ok", engine="chromium", error=None, offline=False):
         self.status, self.body, self._engine, self.error = status, body, engine, error
+        self.offline = offline
         self.fetched, self.opened, self.installed = [], [], []
 
     def fetch(self, url, headers_json, timeout_ms):
         self.fetched.append((url, json.loads(headers_json), timeout_ms))
         if self.error:
-            return json.dumps({"error": self.error})
+            return json.dumps({"error": self.error, "offline": self.offline})
         return json.dumps({"status": self.status, "headers": {"Content-Type": "text/plain"},
                            "via": self._engine, "body": base64.b64encode(self.body).decode()})
 
@@ -1052,13 +1053,50 @@ def test_on_the_phone_yahoo_goes_through_the_phones_own_engine(monkeypatch):
         net.get("https://query1.finance.yahoo.com/v8/y", browser=True)
     assert e.value.status == 429 and "Too Many Requests" in str(e.value)
 
-    fake.error = "UnknownHostException: no network"
+    fake.error, fake.offline = "UnknownHostException: no network", True
     with pytest.raises(net.FetchError) as e:
         net.get("https://query1.finance.yahoo.com/v8/z", browser=True)
-    assert e.value.status is None and "no network" in str(e.value)
+    assert e.value.status is None and e.value.offline and "no network" in str(e.value)
 
     monkeypatch.setattr(android, "engine", "android")                # a phone older than Android 14
     assert not net.have_browser_tls() and "Android 14" in net.browser_tls_problem()
+
+
+def test_on_the_phone_a_server_the_engine_cant_read_is_tried_the_pcs_way(monkeypatch):
+    """On the emulator FRED reset the phone engine's HTTP/2 connections; urllib, the PC's
+    way, is the second try. Neither that nor a slow server counts as being offline."""
+    from folio import android
+    net = _load(ROOT / "folio" / "net.py", "folio.net_fallback_under_test", package="folio")
+    fake = _FakePhone(error="NetworkExceptionImpl: net::ERR_HTTP2_PROTOCOL_ERROR, ErrorCode=11")
+    monkeypatch.setattr(android, "fetch", lambda u, h, t: json.loads(fake.fetch(u, json.dumps(h), int(t * 1000))))
+    asked = []
+
+    class Answer:
+        def __init__(self, req):
+            asked.append(req.get_header("User-agent"))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b"DATE,DGS10\n2026-10-09,4.1\n"
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: Answer(req))
+    for _ in range(5):
+        assert net.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10").startswith(b"DATE")
+    assert asked and asked[0].startswith("Whiskers") and not net.offline()
+
+    with pytest.raises(net.FetchError):                              # Yahoo: no second try
+        net.get("https://query1.finance.yahoo.com/v8/x", browser=True)
+    assert len(asked) == 5
+
+    fake.offline = True                                              # no network: no second try
+    for _ in range(4):
+        with pytest.raises(net.FetchError):
+            net.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10")
+    assert len(asked) == 5 and net.offline()
 
 
 def test_a_slow_server_is_not_a_sign_of_being_offline(monkeypatch):

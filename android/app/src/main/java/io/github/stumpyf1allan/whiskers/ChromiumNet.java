@@ -3,6 +3,7 @@ package io.github.stumpyf1allan.whiskers;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.net.http.HttpEngine;
+import android.net.http.NetworkException;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
@@ -26,5 +27,20 @@ final class ChromiumNet {
 
     static HttpURLConnection open(Object engine, URL url) throws IOException {
         return (HttpURLConnection) ((HttpEngine) engine).openConnection(url);
+    }
+
+    /** True for the engine's errors that mean no network, rather than a difficult server. */
+    static boolean looksOffline(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof NetworkException) {
+                int c = ((NetworkException) t).getErrorCode();
+                return c == NetworkException.ERROR_HOSTNAME_NOT_RESOLVED
+                        || c == NetworkException.ERROR_INTERNET_DISCONNECTED
+                        || c == NetworkException.ERROR_ADDRESS_UNREACHABLE
+                        || c == NetworkException.ERROR_CONNECTION_REFUSED
+                        || c == NetworkException.ERROR_CONNECTION_TIMED_OUT;
+            }
+        }
+        return false;
     }
 }

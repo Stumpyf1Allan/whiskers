@@ -15,9 +15,10 @@ Two kinds of server, treated differently:
 
   On the phone there is no curl_cffi. The Android app hands these requests to the
   phone's own network engine instead (folio/android.py), which from Android 14 is the
-  one Chrome uses. Every GET goes that way on the phone, not only Yahoo's: on the
-  emulator, FRED left Python's own connections hanging while the phone's engine, like
-  any other app's, got straight through.
+  one Chrome uses. Every GET tries that engine first on the phone; anything other than
+  Yahoo that gets no usable answer from it is then tried the way the PC does it, with
+  urllib, because the two fail differently (on the emulator FRED reset the engine's
+  connections and left urllib's hanging).
 
 A machine with no internet should fail fast rather than sit through a dozen timeouts,
 so after several connection failures in a row everything short-circuits for a minute.
@@ -52,14 +53,16 @@ _gap_lock = threading.Lock()
 
 class FetchError(Exception):
     """A request that did not produce a usable body. `status` is the HTTP code when
-    there was one, None for a connection that never completed."""
+    there was one, None for a connection that never completed. `offline` is True when
+    the failure looked like having no network at all."""
 
     def __init__(self, message: str, status: int | None = None, url: str = "",
-                 headers: dict | None = None):
+                 headers: dict | None = None, offline: bool = False):
         super().__init__(message)
         self.status = status
         self.url = url
         self.headers = headers or {}
+        self.offline = offline
 
 
 def offline() -> bool:
@@ -112,10 +115,18 @@ def get(url: str, *, timeout: float = 15.0, headers: dict | None = None,
     """GET a URL and return the body, or raise FetchError."""
     if offline():
         device = "phone" if android.fetch is not None else "computer"
-        raise FetchError(f"This {device} seems to be offline — trying again shortly.", url=url)
+        raise FetchError(f"This {device} seems to be offline — trying again shortly.", url=url,
+                         offline=True)
     _pace(url)
     if android.fetch is not None:
-        return _get_android(url, timeout, headers, browser)
+        try:
+            return _get_android(url, timeout, headers, browser)
+        except FetchError as e:
+            # An answer (even an error page) is the answer, and no network is no network.
+            # Anything else, except Yahoo, which refuses urllib anyway, gets a second try
+            # the way the PC does it.
+            if browser or e.status is not None or e.offline:
+                raise
     if browser and have_browser_tls():
         return _get_curl(url, timeout, headers)
     hdrs = {"User-Agent": BROWSER_UA if browser else "Whiskers (personal portfolio app)",
@@ -143,7 +154,8 @@ def get(url: str, *, timeout: float = 15.0, headers: dict | None = None,
         raise FetchError(f"The server didn't answer within {timeout:g} seconds.", url=url) from None
     except (urllib.error.URLError, OSError) as e:
         _note_connection_failure()
-        raise FetchError(f"Couldn't connect: {getattr(e, 'reason', e)}", url=url) from None
+        raise FetchError(f"Couldn't connect: {getattr(e, 'reason', e)}", url=url,
+                         offline=True) from None
 
 
 def _get_android(url: str, timeout: float, headers: dict | None, browser: bool = True) -> bytes:
@@ -158,11 +170,13 @@ def _get_android(url: str, timeout: float, headers: dict | None, browser: bool =
         r = {"error": f"{type(e).__name__}: {e}"}
     if r.get("error") or r.get("status") is None:
         why = str(r.get("error") or "no answer")
+        if r.get("offline"):                   # no network, no address, nothing listening
+            _note_connection_failure()
+            raise FetchError(f"Couldn't connect: {why}", url=url, offline=True)
+        _state["fails"] = 0                    # something answered, just not usefully
         if why.startswith("SocketTimeoutException"):
-            _state["fails"] = 0                # connected, then too slow: still online
             raise FetchError(f"The server didn't answer within {timeout:g} seconds.", url=url)
-        _note_connection_failure()
-        raise FetchError(f"Couldn't connect: {why}", url=url)
+        raise FetchError(f"No usable answer: {why}", url=url)
     _state["fails"] = 0
     body = base64.b64decode(r.get("body") or "")
     status = int(r["status"])

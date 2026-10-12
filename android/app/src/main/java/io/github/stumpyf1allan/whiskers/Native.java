@@ -67,8 +67,11 @@ public final class Native {
     }
 
     /**
-     * GET a URL. Returns JSON: {status, headers, body (base64), via}, or {error} when no
-     * answer came back at all, which Python turns into the same errors it raises on the PC.
+     * GET a URL. Returns JSON: {status, headers, body (base64), via}, or {error, offline}
+     * when no answer came back at all, which Python turns into the same errors it raises
+     * on the PC. "offline" is true only when the failure looks like having no network
+     * (no address, nothing to connect to), which is what puts Whiskers into its
+     * offline pause; a server that resets or stalls the request doesn't.
      */
     public static String fetch(String url, String headersJson, int timeoutMs) {
         HttpURLConnection c = null;
@@ -107,7 +110,7 @@ public final class Native {
             out.put("body", Base64.encodeToString(body, Base64.NO_WRAP));
             return out.toString();
         } catch (Exception e) {
-            return error(e.getClass().getSimpleName() + ": " + e.getMessage());
+            return error(e.getClass().getSimpleName() + ": " + e.getMessage(), looksOffline(e));
         } finally {
             if (c != null) c.disconnect();
         }
@@ -169,9 +172,17 @@ public final class Native {
         }
     }
 
-    private static String error(String why) {
+    private static boolean looksOffline(Throwable e) {
+        if (e instanceof java.net.UnknownHostException || e instanceof java.net.ConnectException
+                || e instanceof java.net.NoRouteToHostException) {
+            return true;
+        }
+        return Build.VERSION.SDK_INT >= 34 && ChromiumNet.looksOffline(e);
+    }
+
+    private static String error(String why, boolean offline) {
         try {
-            return new JSONObject().put("error", why).toString();
+            return new JSONObject().put("error", why).put("offline", offline).toString();
         } catch (JSONException e) {
             return "{\"error\": \"unknown\"}";
         }
