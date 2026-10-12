@@ -207,6 +207,10 @@ jobs:
           files=(apks/Whiskers-*.apk apks/apksigner.jar)
           [ -f emulator-check.zip ] && files+=(emulator-check.zip)
           gh release upload android-ci "${files[@]}" --clobber
+          # Only the newest few phone builds are worth keeping here.
+          gh release view android-ci --json assets --jq '.assets[].name' \
+            | grep -E '^Whiskers-[0-9.]+\.apk$' | sort -V | head -n -3 \
+            | while read -r old; do gh release delete-asset android-ci "$old" --yes; done || true
 
   # ---------------------------------------------------------------- 3. publish
   publish:
