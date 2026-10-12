@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.Typeface;
@@ -212,6 +213,8 @@ public class MainActivity extends Activity implements PythonServer.Listener {
         s.setDomStorageEnabled(true);        // the page keeps its key in localStorage
         s.setAllowFileAccess(false);
         s.setMediaPlaybackRequiresUserGesture(true);
+        s.setSupportZoom(false);             // laid out for the screen, like any app
+        s.setTextZoom(textZoom(getResources().getConfiguration()));
         s.setUserAgentString(s.getUserAgentString() + " WhiskersAndroid/" + BuildConfig.VERSION_NAME);
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
         web.addJavascriptInterface(new JsBridge(this), "WhiskersAndroid");
@@ -269,6 +272,17 @@ public class MainActivity extends Activity implements PythonServer.Listener {
                 return true;
             }
         });
+    }
+
+    /** The page's text follows the phone's own text size setting. */
+    private static int textZoom(Configuration c) {
+        return Math.round(c.fontScale * 100);
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration c) {
+        super.onConfigurationChanged(c);
+        if (web != null) web.getSettings().setTextZoom(textZoom(c));
     }
 
     private boolean isOurs(Uri u) {

@@ -1058,6 +1058,29 @@ def test_on_the_phone_yahoo_goes_through_the_phones_own_engine(monkeypatch):
     assert not net.have_browser_tls() and "Android 14" in net.browser_tls_problem()
 
 
+def test_a_slow_server_is_not_a_sign_of_being_offline(monkeypatch):
+    """On the emulator, FRED connected and then didn't answer, four times running; that
+    switched everything to offline for a minute, and Yahoo's prices failed with it."""
+    net = _load(ROOT / "folio" / "net.py", "folio.net_slow_under_test", package="folio")
+
+    def slow(*a, **k):
+        raise TimeoutError("The read operation timed out")
+    monkeypatch.setattr(urllib.request, "urlopen", slow)
+    for _ in range(6):
+        with pytest.raises(net.FetchError) as e:
+            net.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10", timeout=25)
+        assert "didn't answer within 25 seconds" in str(e.value)
+    assert not net.offline()
+
+    def unreachable(*a, **k):
+        raise urllib.error.URLError(OSError("Network is unreachable"))
+    monkeypatch.setattr(urllib.request, "urlopen", unreachable)
+    for _ in range(4):
+        with pytest.raises(net.FetchError):
+            net.get("https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10")
+    assert net.offline()                                             # no network at all: still fast
+
+
 def test_the_phone_app_updates_from_its_own_channel(monkeypatch, tmp_path):
     from folio import updates
     assert updates.platform_key() != "android"

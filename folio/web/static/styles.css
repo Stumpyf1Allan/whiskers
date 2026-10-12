@@ -260,7 +260,8 @@ td .sym { color: var(--muted); font-size: .8rem; }
                    border-radius: 50%; box-shadow: 0 0 0 2px var(--panel); }
 .band-fig { text-align: right; font-size: .84rem; }
 .band-fig .fig { font-size: 1rem; }
-@media (max-width: 760px) { .band-row { grid-template-columns: 1fr; } .band-fig { text-align: left; } }
+/* !important because the rule rows set their own columns inline, for wide screens */
+@media (max-width: 760px) { .band-row { grid-template-columns: 1fr !important; } .band-fig { text-align: left; } }
 
 /* the platform limit bars */
 .limit-bar { position: relative; height: 12px; background: var(--line-2); border-radius: 6px; overflow: visible; }
@@ -399,6 +400,10 @@ hr.soft { border: 0; border-top: 1px solid var(--line-2); margin: 6px 0; }
   .modal { padding: 0; }
   .modal-card, .modal-card.wide { max-height: 100vh; border-radius: 0; }
   .toasts { left: 12px; right: 12px; bottom: 84px; }
+  /* Nothing may be wider than the screen. One row too wide widens the whole page, the
+     browser then stretches its layout to fit, and the icon bar goes off the bottom. */
+  .stack, .stack-lg { grid-template-columns: minmax(0, 1fr); }
+  .row, .spread { flex-wrap: wrap; }
 }
 
 /* narratives: what each section is saying */

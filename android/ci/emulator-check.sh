@@ -52,6 +52,12 @@ note "Python started and the server answered"
 sleep 8
 shot 01-first-start
 
+# The tour opens by itself on a first start. Back closes it, and must not leave the app.
+adb shell input keyevent KEYCODE_BACK
+sleep 2
+in_app() { adb shell dumpsys activity activities | grep -m1 -E 'topResumedActivity|mResumedActivity' | grep -q "$PKG"; }
+if in_app; then note "Back closed the tour and stayed in Whiskers"; else fail "Back on the tour left the app"; fi
+
 code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' "$BASE/api/bootstrap")
 if [ "$code" = 401 ]; then note "Without the key the API refuses (401), as it should for other apps";
 else fail "Without the key the API answered $code instead of 401"; fi
@@ -68,8 +74,19 @@ print(f"Bootstrap: Whiskers {b['app']['version']}, android={b['app']['android']}
       f"browser_tls={b['browser_tls']}")
 PY
 
-# No tour over the screenshots from here on.
-api -X PATCH -H 'Content-Type: application/json' -d '{"toured": true}' "$BASE/api/settings" > /dev/null
+# Yahoo, before anything else has touched the network: through the phone's own engine.
+if api -X POST -H 'Content-Type: application/json' -d '{"symbol": "VWRP.L"}' "$BASE/api/check-symbol" > "$OUT/check-symbol.json"; then
+  note "Yahoo, through the phone's engine: $(cat "$OUT/check-symbol.json")"
+  # Yahoo sometimes turns away GitHub's machines whatever they send, so this warns rather
+  # than fails; the engine itself is checked through Settings below.
+  python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["ok"] else 1)' "$OUT/check-symbol.json" \
+    || { note "WARNING: Yahoo gave no price on the emulator"; echo "::warning title=Yahoo::No price for VWRP.L on the emulator"; }
+else fail "check-symbol failed"; fi
+# For comparison, from the build machine itself (outside the emulator).
+for u in "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10" \
+         "https://query1.finance.yahoo.com/v8/finance/chart/VWRP.L?range=5d&interval=1d"; do
+  note "From the build machine: $(curl -s -o /dev/null --max-time 30 -w '%{http_code} in %{time_total}s' "$u" || echo 'no answer') for ${u%%\?*}"
+done
 
 api -X POST -H 'Content-Type: application/json' -d '{}' "$BASE/api/sample/load" > "$OUT/sample.json"
 api -X POST -H 'Content-Type: application/json' -d '{"force": true}' "$BASE/api/refresh" > /dev/null
@@ -90,9 +107,13 @@ PY
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))["sources"]; sys.exit(0 if s["ok"] > 0 else 1)' "$OUT/settings.json" \
   || fail "No price series came in at all"
 
-if api -X POST -H 'Content-Type: application/json' -d '{"symbol": "VWRP.L"}' "$BASE/api/check-symbol" > "$OUT/check-symbol.json"; then
-  note "Yahoo, through the phone's engine: $(cat "$OUT/check-symbol.json")"
-else fail "check-symbol failed"; fi
+api "$BASE/api/markets" > "$OUT/markets.json"
+python3 - "$OUT/markets.json" <<'PY' | tee -a "$OUT/summary.txt"
+import collections, json, sys
+series = json.load(open(sys.argv[1]))["series"]
+by = collections.Counter((s.get("source") or "none") for s in series if s.get("value") is not None)
+print(f"Markets screen: {sum(by.values())} of {len(series)} series have figures; by source: {dict(by)}")
+PY
 
 if api -o "$OUT/export.xlsx" "$BASE/api/export/xlsx" && python3 - "$OUT/export.xlsx" <<'PY' | tee -a "$OUT/summary.txt"
 import sys, zipfile

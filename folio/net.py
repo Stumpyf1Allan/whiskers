@@ -19,6 +19,8 @@ Two kinds of server, treated differently:
 
 A machine with no internet should fail fast rather than sit through a dozen timeouts,
 so after several connection failures in a row everything short-circuits for a minute.
+A server that connects and then answers too slowly is not a sign of being offline,
+though: counting those once let a slow FRED take Yahoo down with it for that minute.
 """
 
 from __future__ import annotations
@@ -107,7 +109,8 @@ def get(url: str, *, timeout: float = 15.0, headers: dict | None = None,
         browser: bool = False) -> bytes:
     """GET a URL and return the body, or raise FetchError."""
     if offline():
-        raise FetchError("This computer seems to be offline — trying again shortly.", url=url)
+        device = "phone" if android.fetch is not None else "computer"
+        raise FetchError(f"This {device} seems to be offline — trying again shortly.", url=url)
     _pace(url)
     if browser and android.fetch is not None:
         return _get_android(url, timeout, headers)
@@ -131,7 +134,12 @@ def get(url: str, *, timeout: float = 15.0, headers: dict | None = None,
             detail = ""
         raise FetchError(f"HTTP {e.code} {detail}".strip(), status=e.code, url=url,
                          headers=dict(e.headers or {})) from None
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
+    except TimeoutError:
+        # Connected, then no answer in time. urllib wraps a failure to connect in URLError,
+        # so a bare timeout here is a slow server, and we are online.
+        _state["fails"] = 0
+        raise FetchError(f"The server didn't answer within {timeout:g} seconds.", url=url) from None
+    except (urllib.error.URLError, OSError) as e:
         _note_connection_failure()
         raise FetchError(f"Couldn't connect: {getattr(e, 'reason', e)}", url=url) from None
 
@@ -146,8 +154,12 @@ def _get_android(url: str, timeout: float, headers: dict | None) -> bytes:
     except Exception as e:                     # whatever the Java side threw
         r = {"error": f"{type(e).__name__}: {e}"}
     if r.get("error") or r.get("status") is None:
+        why = str(r.get("error") or "no answer")
+        if why.startswith("SocketTimeoutException"):
+            _state["fails"] = 0                # connected, then too slow: still online
+            raise FetchError(f"The server didn't answer within {timeout:g} seconds.", url=url)
         _note_connection_failure()
-        raise FetchError(f"Couldn't connect: {r.get('error') or 'no answer'}", url=url)
+        raise FetchError(f"Couldn't connect: {why}", url=url)
     _state["fails"] = 0
     body = base64.b64decode(r.get("body") or "")
     status = int(r["status"])
