@@ -6,12 +6,14 @@ import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -37,6 +39,8 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import org.json.JSONObject;
+
 import java.lang.ref.WeakReference;
 import java.util.Calendar;
 
@@ -51,6 +55,7 @@ import java.util.Calendar;
 public class MainActivity extends Activity implements PythonServer.Listener {
     private static final String TAG = "Whiskers";
     private static final int PICK_FILE = 41;
+    private static final int PICK_SYNC = 42;
     /** Opens a given screen, e.g. "holdings". The emulator check uses it for screenshots. */
     static final String EXTRA_VIEW = "whiskers.view";
     private static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT;
@@ -307,8 +312,46 @@ public class MainActivity extends Activity implements PythonServer.Listener {
         return true;
     }
 
+    /**
+     * The PC's copy of Whiskers, chosen once in Android's own picker, which can open files
+     * in OneDrive or Google Drive. Whiskers keeps permission to read that one file, so the
+     * phone can load it again whenever it opens (folio/sync.py).
+     */
+    void pickSyncFile() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        try {
+            startActivityForResult(i, PICK_SYNC);
+        } catch (ActivityNotFoundException e) {
+            Log.w(TAG, "No file picker answered", e);
+        }
+    }
+
+    private void syncFileChosen(Uri u) {
+        if (u == null || web == null) return;
+        try {
+            getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException e) {
+            Log.w(TAG, "No lasting permission to read " + u, e);
+        }
+        String name = "";
+        try (Cursor c = getContentResolver().query(u, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (c != null && c.moveToFirst() && c.getString(0) != null) name = c.getString(0);
+        } catch (Exception e) {
+            Log.w(TAG, "The chosen file's name couldn't be read", e);
+        }
+        web.evaluateJavascript("window.whiskersSyncFilePicked && window.whiskersSyncFilePicked("
+                + JSONObject.quote(u.toString()) + ", " + JSONObject.quote(name) + ")", null);
+    }
+
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
+        if (request == PICK_SYNC) {
+            syncFileChosen(result == RESULT_OK && data != null ? data.getData() : null);
+            return;
+        }
         if (request == PICK_FILE) {
             if (chooser != null) {
                 Uri u = (result == RESULT_OK && data != null) ? data.getData() : null;
@@ -318,6 +361,15 @@ public class MainActivity extends Activity implements PythonServer.Listener {
             return;
         }
         super.onActivityResult(request, result, data);
+    }
+
+    /** Back at the front: the page loads the PC's copy if it has changed since (folio/sync.py). */
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (pageShown && web != null) {
+            web.evaluateJavascript("window.whiskersResumed && window.whiskersResumed()", null);
+        }
     }
 
     /** Back closes what's open in the page first, then returns to the overview, then leaves. */

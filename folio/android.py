@@ -29,3 +29,9 @@ open_url: Callable[[str], bool] | None = None
 #: "allow" when the person must first let Whiskers install apps (Android has just opened
 #: that switch for them); or a short reason it couldn't.
 install: Callable[[str], str] | None = None
+
+#: Read a file the person chose with Android's file picker (the PC's copy, kept in
+#: OneDrive or Google Drive), by its content:// address: {"body": base64} or
+#: {"error": reason}. The app keeps permission to read that one file, so it works on
+#: later days too (folio/sync.py).
+read_document: Callable[[str], dict] | None = None

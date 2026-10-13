@@ -347,6 +347,19 @@ class TestManners:
         updates.check()
         assert len(calls) == 1, "it asked the server more than once in 20 hours"
 
+    def test_download_after_a_restart_asks_again_rather_than_refusing(self, host, monkeypatch):
+        """A restart keeps the new version's number but not where to fetch it, and the
+        Download button used to answer "nothing to download". It now asks again."""
+        from folio.web import server
+        host.publish()
+        updates.check(force=True)
+        updates._set(download=None, status="idle")          # what a restart leaves behind
+        started = []
+        monkeypatch.setattr(updates, "start_download", lambda: started.append(1) or True)
+        out = server.api_update_download(None, {}, {}, None)
+        assert started, "the download never started"
+        assert out["download"]["sha256"] == DIGEST
+
     def test_a_dead_server_is_an_error_state_not_an_exception(self, host):
         config.settings["update_url"] = "https://127.0.0.1:9/latest.json"
         st = updates.check(force=True)     # must not raise

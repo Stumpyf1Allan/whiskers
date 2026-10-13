@@ -69,4 +69,5 @@ def plug_in(android) -> None:
     android.fetch = fetch
     android.open_url = lambda url: bool(native.openUrl(url))
     android.install = lambda path: str(native.installApk(path))
+    android.read_document = lambda uri: json.loads(str(native.readDocument(uri)))
     android.engine = str(native.engine())

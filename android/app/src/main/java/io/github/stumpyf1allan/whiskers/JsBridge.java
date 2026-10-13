@@ -30,4 +30,13 @@ final class JsBridge {
     public void themeChanged(String theme) {
         activity.runOnUiThread(() -> activity.applyTheme("dark".equals(theme)));
     }
+
+    /**
+     * Open the system file picker for the PC's copy of Whiskers (in OneDrive or Google
+     * Drive). The answer comes back to the page as window.whiskersSyncFilePicked(uri, name).
+     */
+    @JavascriptInterface
+    public void pickSyncFile() {
+        activity.runOnUiThread(activity::pickSyncFile);
+    }
 }

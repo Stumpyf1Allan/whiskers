@@ -22,7 +22,7 @@ import unicodedata
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .. import android, config, db, net, security, updates
+from .. import android, config, db, net, security, sync, updates
 from ..brokers import freetrade, monzo, symbols, trading212
 from ..engine import (allocation, export, isa, mathx, narrative, plan, planbuilder, playbook, portfolio,
                       rules, sample, signals, stress)
@@ -97,6 +97,7 @@ def api_bootstrap(req, m, q, body):
         "sample": sample.loaded(),
         "browser_tls": net.have_browser_tls(),
         "refresh": store.job_state(),
+        "sync": {"role": sync.role()},
     }
 
 
@@ -486,6 +487,7 @@ def api_settings(req, m, q, body):
         "vault": security.storage_backend(), "data_dir": str(config.data_dir()),
         "version": config.APP_VERSION, "sample": sample.loaded(),
         "plan_loaded": db.get_meta("plan_loaded"),
+        "sync": sync.status(),
     }
 
 
@@ -809,6 +811,12 @@ def api_sample_remove(req, m, q, body):
 # ============================================================================ refreshing
 
 def _sync_brokers():
+    if sync.role() == "phone":       # the PC's copy first, so the brokers update on top of it
+        store.JOB.update(current="Your PC's copy")
+        try:
+            sync.pull()
+        except sync.SyncError as e:
+            store.JOB["errors"].append({"key": "Your PC's copy", "message": str(e)})
     freetrade.rebuild_all()          # bills that matured since the last import drop out
     for p in db.rows("SELECT id, name FROM platforms WHERE provider='bank'"):
         if monzo.linked(p["id"]):
@@ -851,6 +859,11 @@ def api_update_check(req, m, q, body):
 
 @route("POST", "/api/update/download")
 def api_update_download(req, m, q, body):
+    if not updates.state().get("download"):
+        # After a restart the app remembers that a newer version exists (so the bar comes
+        # back) but not where to fetch it, and Android stops the app's Python whenever it
+        # likes. So ask the server again rather than refuse.
+        updates.check(force=True)
     if not updates.state().get("download"):
         raise ApiError("There's nothing to download — check for an update first.")
     updates.start_download()
@@ -920,6 +933,67 @@ def api_open_url(req, m, q, body):
         return {"opened": True}
     except Exception as e:
         return {"opened": False, "problem": str(e), "url": url}
+
+
+# ============================================================================ the phone's copy
+
+@route("GET", "/api/sync")
+def api_sync_state(req, m, q, body):
+    return sync.status()
+
+
+@route("POST", "/api/sync/pc")
+def api_sync_pc(req, m, q, body):
+    """The PC: start keeping an encrypted copy for the phone in a folder (OneDrive)."""
+    b = body or {}
+    try:
+        return sync.setup_pc(str(b.get("folder") or ""), str(b.get("passphrase") or ""))
+    except sync.SyncError as e:
+        raise ApiError(str(e)) from None
+
+
+@route("POST", "/api/sync/write")
+def api_sync_write(req, m, q, body):
+    try:
+        return sync.write_now()
+    except sync.SyncError as e:
+        raise ApiError(str(e)) from None
+
+
+@route("POST", "/api/sync/phone")
+def api_sync_phone(req, m, q, body):
+    """The phone: follow the file chosen in Android's picker, loading it now."""
+    b = body or {}
+    try:
+        out = sync.setup_phone(str(b.get("uri") or ""), str(b.get("passphrase") or ""),
+                               str(b.get("name") or ""))
+    except sync.SyncError as e:
+        raise ApiError(str(e)) from None
+    store.start_refresh(before=_sync_brokers)
+    return out
+
+
+@route("POST", "/api/sync/pull")
+def api_sync_pull(req, m, q, body):
+    """The phone, on opening or coming back to the front: load the PC's copy if it is new.
+    A load replaces Trading 212's figures with the PC's, so a refresh follows it."""
+    try:
+        out = sync.pull(force=bool((body or {}).get("force")) if isinstance(body, dict) else False)
+    except sync.SyncError as e:
+        raise ApiError(str(e)) from None
+    if out.get("loaded"):
+        store.start_refresh(before=_sync_brokers)
+    return out
+
+
+@route("DELETE", "/api/sync")
+def api_sync_stop(req, m, q, body):
+    return sync.stop()
+
+
+#: Requests that change nothing the phone's copy holds, or that look after it themselves.
+_NOT_A_CHANGE = ("/api/sync", "/api/update", "/api/refresh", "/api/open-", "/api/check-symbol",
+                 "/api/plan/build", "/api/allocation/new-money")
 
 
 # ============================================================================ plumbing
@@ -1037,6 +1111,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, out["_file"], out.get("_type", "application/octet-stream"),
                                       {"Content-Disposition":
                                        f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quoted}'})
+                if method != "GET" and not path.startswith(_NOT_A_CHANGE):
+                    sync.after_change()          # the PC: refresh the phone's copy shortly
                 return self._json(out)
             except ApiError as e:
                 return self._json({"error": e.message}, e.status)

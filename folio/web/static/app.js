@@ -1285,6 +1285,8 @@ async function vSettings(el) {
       ${d.sample ? '<button class="btn danger" data-act="sample-remove">Remove the sample</button>' : '<button class="btn" data-act="sample-load">Load the sample</button>'}
     </section>
 
+    ${syncPanel(d.sync)}
+
     <section class="panel"><h2>Updates and your data</h2>
       <dl class="kv"><dt>Version</dt><dd>${esc(d.version)}</dd>
         <dt>Updates</dt><dd>${up ? updateWords(up) : 'Unknown'}</dd>
@@ -1504,6 +1506,131 @@ ACTS['upd-check'] = async b => { await busy(b, async () => { const u = await api
 ACTS['open-data'] = () => api('/api/open-data-folder', { method: 'POST' }).catch(e => toast(e.message, true));
 ACTS['toggle-refresh'] = b => api('/api/settings', { method: 'PATCH', body: { refresh_on_open: b.checked } }).catch(e => toast(e.message, true));
 
+// ---------------------------------------------------------------------------- the phone's copy
+
+// The PC keeps an encrypted copy of its data in OneDrive; the phone follows it
+// (folio/sync.py). The panel reads differently on each, and on each before and after.
+function syncPanel(sy) {
+  if (!sy) return '';
+  if (sy.device === 'phone') {
+    if (sy.role === 'phone') {
+      return `<section class="panel"><h2>Your PC\u2019s copy</h2>
+        <p class="lede">This phone follows Whiskers on your PC. It loads the PC\u2019s copy whenever Whiskers opens here, and still refreshes prices and Trading 212 itself.</p>
+        <dl class="kv"><dt>File</dt><dd class="small">${esc(sy.label || sy.file_name)}</dd>
+          <dt>Last loaded</dt><dd>${sy.loaded_at ? ago(sy.loaded_at) : 'Not yet'}${sy.source_written_at ? `, saved on your PC ${ago(sy.source_written_at)}` : ''}</dd></dl>
+        ${sy.last_error ? `<p class="warnline small">${esc(sy.last_error)}</p>` : ''}
+        <p class="note">Make changes on your PC. Anything changed on this phone is replaced the next time your PC\u2019s copy loads.</p>
+        <div class="row wrap" style="margin-top:10px"><button class="btn" data-act="sync-pull">Load it now</button><button class="btn" data-act="sync-pick">Choose a different file</button><button class="btn ghost danger" data-act="sync-stop">Stop following</button></div>
+      </section>`;
+    }
+    return `<section class="panel"><h2>Your PC\u2019s copy</h2>
+      <p class="lede">Keep this phone in step with Whiskers on your PC, so both show the same holdings, history, plan and corrections.</p>
+      <div class="steps">
+        <div class="step"><div>On your PC, open Whiskers, go to <b>Settings \u203a Your phone</b> and start keeping a copy in OneDrive, with a passphrase.</div></div>
+        <div class="step"><div>Check the <b>OneDrive</b> app is on this phone and signed in. Google Drive works too.</div></div>
+        <div class="step"><div>Tap <b>Choose the file</b>, open OneDrive, pick <b>${esc(sy.file_name)}</b>, and type the same passphrase.</div></div>
+      </div>
+      <button class="btn primary" data-act="sync-pick" style="margin-top:10px">Choose the file</button>
+    </section>`;
+  }
+  if (sy.role === 'pc') {
+    return `<section class="panel"><h2>Your phone</h2>
+      <p class="lede">Whiskers keeps an encrypted copy of your data for your phone, and updates it a few seconds after anything changes. Keys and passwords never go into it.</p>
+      <dl class="kv"><dt>Folder</dt><dd class="small">${esc(sy.folder)}</dd>
+        <dt>File</dt><dd class="small">${esc(sy.file_name)}</dd>
+        <dt>Last saved</dt><dd>${sy.written_at ? ago(sy.written_at) : 'Not yet'}</dd></dl>
+      ${sy.last_error ? `<p class="warnline small">${esc(sy.last_error)}</p>` : ''}
+      <p class="note">On your phone: Settings \u203a Your PC\u2019s copy \u203a Choose the file, then pick it from OneDrive.</p>
+      <div class="row wrap" style="margin-top:10px"><button class="btn" data-act="sync-write">Save it now</button><button class="btn ghost danger" data-act="sync-stop">Stop</button></div>
+    </section>`;
+  }
+  return `<section class="panel"><h2>Your phone</h2>
+    <p class="lede">Keep the Whiskers app on your phone in step with this computer. Whiskers saves an encrypted copy of your data in a folder that OneDrive carries to the cloud, and updates it whenever anything changes. Your phone loads it whenever Whiskers opens there. Your Trading 212 and Monzo keys never go into it.</p>
+    ${sy.can_encrypt === false ? '<p class="warnline small">This copy of Whiskers can\u2019t encrypt files, so this isn\u2019t available here.</p>' : `
+    <div class="stack" style="max-width:640px;margin-top:8px">
+      <label class="field">Folder<input type="text" id="sync-folder" value="${esc(sy.suggested_folder || '')}" placeholder="C:\\Users\\you\\OneDrive\\Whiskers" spellcheck="false"><span class="help">A folder inside OneDrive, or Google Drive or Dropbox on this computer. It\u2019s made if it isn\u2019t there.</span></label>
+      <label class="field">Passphrase<input type="password" id="sync-pass" autocomplete="new-password"><span class="help">At least 8 characters. A few unrelated words work well. You\u2019ll type it once on your phone.</span></label>
+      <label class="field">Passphrase again<input type="password" id="sync-pass2" autocomplete="new-password"></label>
+      <div><button class="btn primary" data-act="sync-start">Start keeping a copy</button></div>
+    </div>`}
+  </section>`;
+}
+
+ACTS['sync-start'] = async b => {
+  const p1 = $('#sync-pass').value;
+  if (p1 !== $('#sync-pass2').value) { toast('The two passphrases don\u2019t match.', true); return; }
+  await busy(b, async () => {
+    await api('/api/sync/pc', { method: 'POST', body: { folder: $('#sync-folder').value, passphrase: p1 } });
+    toast('Saved a copy for your phone. Now choose it in Whiskers on your phone.');
+    await refreshBoot();
+    render();
+  });
+};
+ACTS['sync-write'] = async b => { await busy(b, async () => { await api('/api/sync/write', { method: 'POST' }); toast('Saved.'); render(); }); };
+ACTS['sync-stop'] = async () => {
+  const phone = onAndroid();
+  if (!await confirmBox(phone ? 'Stop following your PC?' : 'Stop keeping a copy for your phone?',
+    phone ? 'This phone keeps what it has now and stops loading your PC\u2019s copy.'
+          : 'The copy already in the folder stays there until you delete it, and your phone keeps what it last loaded.',
+    'Stop', true)) return;
+  await api('/api/sync', { method: 'DELETE' }).catch(e => toast(e.message, true));
+  await refreshBoot();
+  render();
+};
+ACTS['sync-pick'] = () => {
+  if (!window.WhiskersAndroid || !WhiskersAndroid.pickSyncFile) { toast('Update the Whiskers app on this phone first.', true); return; }
+  WhiskersAndroid.pickSyncFile();
+};
+ACTS['sync-pull'] = async b => {
+  await busy(b, async () => {
+    const r = await api('/api/sync/pull', { method: 'POST', body: { force: true } });
+    toast(r.loaded ? 'Loaded your PC\u2019s copy.' : 'Already up to date.');
+    await refreshBoot();
+    render();
+    pollRefresh();
+  });
+};
+
+// The Android app hands back the file chosen in its picker (MainActivity).
+window.whiskersSyncFilePicked = (uri, name) => {
+  if (!uri) return;
+  openModal({ title: 'Load your PC\u2019s copy', body: `<div class="stack">
+      <p>This replaces what Whiskers has on this phone with your PC\u2019s copy: platforms, holdings, history, sleeves, rules and plans. Your Trading 212 and Monzo connections on this phone stay.</p>
+      ${name ? `<p class="small muted">${esc(name)}</p>` : ''}
+      <label class="field">Passphrase<input type="password" id="sync-phone-pass" autocomplete="off"><span class="help">The one you set on your PC.</span></label>
+      <p class="note">The first time, what this phone had before is kept in a backup file in Whiskers\u2019 own storage.</p></div>`,
+    foot: `<button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="sync-phone-load">Load it</button>` });
+  ACTS['sync-phone-load'] = async b => {
+    await busy(b, async () => {
+      const r = await api('/api/sync/phone', { method: 'POST', body: { uri, name: name || '', passphrase: $('#sync-phone-pass').value } });
+      closeModal();
+      toast(r.message);
+      await refreshBoot();
+      render();
+      pollRefresh();
+    });
+  };
+};
+
+// Whiskers opened, or came back to the front: load the PC's copy if it has changed.
+// Problems are kept quiet here and shown in Settings, under Your PC's copy.
+let syncPulling = false;
+async function syncPull() {
+  if (syncPulling || !S.boot || !S.boot.sync || S.boot.sync.role !== 'phone') return;
+  syncPulling = true;
+  try {
+    const r = await api('/api/sync/pull', { method: 'POST', body: {} });
+    if (r.loaded) {
+      await refreshBoot();
+      if ($('#modal').hidden) render();
+      pollRefresh();
+      toast('Updated from your PC.');
+    }
+  } catch (e) { /* recorded by the server; Settings shows it */ }
+  finally { syncPulling = false; }
+}
+window.whiskersResumed = () => { syncPull(); };
+
 // ============================================================================ start
 
 async function boot() {
@@ -1538,6 +1665,7 @@ async function boot() {
   pollRefresh();
   checkUpdateBanner();
   setInterval(checkUpdateBanner, 30 * 60 * 1000);
+  syncPull();
 }
 
 boot();

@@ -302,6 +302,11 @@ def start_refresh(force: bool = False, before=None) -> bool:
                 portfolio.take_snapshot()
             except Exception as e:
                 db.log("snapshot.error", str(e))
+            try:
+                from .. import sync
+                sync.after_change()          # the PC: the phone's copy gets these figures too
+            except Exception as e:
+                db.log("sync.error", str(e))
         finally:
             JOB.update(running=False, finished=db.now(), current="", phase="")
 

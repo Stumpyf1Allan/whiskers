@@ -160,6 +160,28 @@ public final class Native {
         }
     }
 
+    /**
+     * Read a file the person chose in Android's picker (the PC's copy of Whiskers, in
+     * OneDrive or Google Drive). Returns JSON {body (base64)}, or {error, offline}.
+     * MainActivity kept lasting permission to read it, so this works on later days too,
+     * for as long as the file is there and its cloud app can fetch it.
+     */
+    public static String readDocument(String uri) {
+        if (app == null) return error("the app isn't ready yet", false);
+        Uri u = Uri.parse(uri);
+        if (!"content".equals(u.getScheme())) return error("not a file chosen in the picker", false);
+        try {
+            InputStream in = app.getContentResolver().openInputStream(u);
+            if (in == null) return error("the file couldn't be opened", false);
+            byte[] body = readAll(in);            // closes the stream
+            return new JSONObject().put("body", Base64.encodeToString(body, Base64.NO_WRAP)).toString();
+        } catch (SecurityException e) {
+            return error("Whiskers is no longer allowed to read that file, so choose it again", false);
+        } catch (Exception e) {
+            return error(e.getClass().getSimpleName() + ": " + e.getMessage(), looksOffline(e));
+        }
+    }
+
     private static byte[] readAll(InputStream in) throws IOException {
         try (InputStream s = in; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             byte[] buf = new byte[64 * 1024];
