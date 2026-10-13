@@ -211,8 +211,8 @@ def synthetic(ident: str, days: int = 1400, anchor: float | None = None) -> dict
     Never reachable unless WHISKERS_FAKE_MARKET=1 is set, and the interface shows a
     red banner whenever it is — made-up prices that look real are worse than none.
     """
-    seed = int(hashlib.sha1(ident.encode()).hexdigest()[:8], 16)
-    rnd = random.Random(seed)
+    seed = int(hashlib.sha1(ident.encode(), usedforsecurity=False).hexdigest()[:8], 16)
+    rnd = random.Random(seed)  # nosec B311  # repeatable made-up prices, not security
     level = _SYNTH_LEVEL.get(ident)
     mean_revert = ident in ("^VIX", "VIXCLS", "BAMLH0A0HYM2", "DGS10")
     if level is None:

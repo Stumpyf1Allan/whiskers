@@ -113,6 +113,10 @@ def browser_tls_problem() -> str | None:
 def get(url: str, *, timeout: float = 15.0, headers: dict | None = None,
         browser: bool = False) -> bytes:
     """GET a URL and return the body, or raise FetchError."""
+    if not url.lower().startswith("https://"):
+        # Everything Whiskers fetches is https. Refusing anything else here means a
+        # mistake elsewhere can never become a file:// read or a plain-http request.
+        raise FetchError("Only https addresses are fetched.", url=url)
     if offline():
         device = "phone" if android.fetch is not None else "computer"
         raise FetchError(f"This {device} seems to be offline — trying again shortly.", url=url,
@@ -135,7 +139,7 @@ def get(url: str, *, timeout: float = 15.0, headers: dict | None = None,
     hdrs.update(headers or {})
     req = urllib.request.Request(url, headers=hdrs)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:  # nosec B310  # https only, checked above
             body = r.read()
         _state["fails"] = 0
         return body

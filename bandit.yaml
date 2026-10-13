@@ -1,0 +1,7 @@
+# Bandit settings for Whiskers.  Run from the repository folder:
+#   bandit -c bandit.yaml -r .
+# Each accepted finding has a "# nosec <test>  # reason" comment beside it.
+exclude_dirs:
+  - .audit-venv
+  - .venv
+  - tests

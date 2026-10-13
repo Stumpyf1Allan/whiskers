@@ -282,7 +282,11 @@ def log(kind: str, detail=None):
 
 
 def fingerprint(*parts) -> str:
-    return hashlib.sha1("|".join(str(p) for p in parts).encode("utf-8")).hexdigest()
+    """A de-duplication key, not a security measure. It has to stay SHA-1: every stored
+    trade, dividend and cash movement is matched on it, so a different hash would make the
+    next import treat the whole history as new."""
+    return hashlib.sha1("|".join(str(p) for p in parts).encode("utf-8"),
+                        usedforsecurity=False).hexdigest()
 
 
 def now() -> str:

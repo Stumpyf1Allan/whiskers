@@ -12,7 +12,7 @@ import logging
 import os
 import pathlib
 import shutil
-import subprocess
+import subprocess  # nosec B404  # argument lists only, never a shell
 import sys
 import threading
 import time
@@ -101,7 +101,7 @@ def _try_app_window(url: str) -> subprocess.Popen | None:
         return None
     profile = config.data_dir() / "window"
     try:
-        return subprocess.Popen(
+        return subprocess.Popen(  # nosec B603  # a known browser path and our own local address
             [exes[0], f"--app={url}", f"--user-data-dir={profile}", "--window-size=1380,900",
              "--no-first-run", "--no-default-browser-check"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -157,7 +157,7 @@ def run_phone(port: int) -> int:
     opener = shutil.which("termux-open-url")
     if running:                                   # already going: just show it
         if opener:
-            subprocess.Popen([opener, url])
+            subprocess.Popen([opener, url])  # nosec B603  # termux-open-url with our own local address
         print(url)
         return 0
     _setup_logging(False)
@@ -166,7 +166,7 @@ def run_phone(port: int) -> int:
     _startup_jobs()
     print(f"\n  {config.APP_NAME} is running. Leave Termux open in the background.\n  {url}\n")
     if opener:
-        subprocess.Popen([opener, url])
+        subprocess.Popen([opener, url])  # nosec B603  # termux-open-url with our own local address
     try:
         while True:
             time.sleep(3600)

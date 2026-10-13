@@ -9,3 +9,6 @@ build/Whiskers/
 *.db-wal
 *.db-shm
 .vaultkey
+# Security-audit tools and their reports stay out of the repository
+.audit-venv/
+bandit-report.json

@@ -1418,6 +1418,20 @@ def test_an_empty_copy_exports_without_error():
     assert wb["Holdings"].max_row == 1 and wb["Summary"]["A1"].value.startswith("Whiskers")
 
 
+def test_text_that_looks_like_a_formula_is_exported_as_text():
+    """Names and notes are typed by people or arrive in a plan file. The export is values
+    only, so one that starts with "=" must stay text, never become a live formula."""
+    pid = add_platform('=HYPERLINK("https://example.invalid","x")')
+    iid = add_position(pid, "NVDA", name="=1+1")
+    db.execute("UPDATE instruments SET notes=? WHERE id=?", ('=WEBSERVICE("https://example.invalid")', iid))
+    import io
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(export.build()))
+    cells = [c for ws in wb.worksheets for row in ws.iter_rows() for c in row]
+    assert [c.coordinate for c in cells if c.data_type == "f"] == []
+    assert any(c.value == "=1+1" for c in cells)
+
+
 def test_the_export_route_sends_a_real_xlsx_as_an_attachment(server):
     status, body, headers = _req(server, "/api/export/xlsx")
     assert status == 200

@@ -244,6 +244,14 @@ def build() -> bytes:
     _trades(wb)
     _cash(wb)
     wb.active = 0
+    # Values only. openpyxl turns any text starting with "=" into a live formula, and
+    # names, notes and plan files are typed by people, so nothing may calculate, link
+    # or fetch when the file is opened.
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.data_type == "f":
+                    cell.data_type = "s"
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

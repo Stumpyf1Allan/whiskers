@@ -64,7 +64,7 @@ def metas(keys: list[str]) -> dict[str, dict]:
     if not keys:
         return {}
     q = ",".join("?" * len(keys))
-    return {r["key"]: r for r in db.rows(f"SELECT * FROM series_meta WHERE key IN ({q})", keys)}
+    return {r["key"]: r for r in db.rows(f"SELECT * FROM series_meta WHERE key IN ({q})", keys)}  # nosec B608  # only ? placeholders
 
 
 def latest(key: str) -> dict | None:

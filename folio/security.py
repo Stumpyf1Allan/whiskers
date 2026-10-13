@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import pathlib
 import secrets
@@ -43,7 +44,13 @@ def _key_file() -> pathlib.Path:
     return config.data_dir() / ".vaultkey"
 
 
+#: Where the vault key actually came from, once it has been loaded. Until then Settings
+#: can only say where it would go.
+_backend_used: str | None = None
+
+
 def _load_or_create_key() -> bytes:
+    global _backend_used
     kr = _try_keyring()
     if kr is not None:
         try:
@@ -56,17 +63,24 @@ def _load_or_create_key() -> bytes:
                     if val:
                         try:              # copy it forward, but never lose the original
                             kr.set_password(_KEYRING_SERVICE, _KEYRING_USER, val)
-                        except Exception:
+                        except Exception:  # nosec B110  # a courtesy; the original entry is untouched
                             pass
                         break
             if val:
+                _backend_used = "os-keychain"
                 return base64.urlsafe_b64decode(val.encode())
             raw = secrets.token_bytes(32)
             kr.set_password(_KEYRING_SERVICE, _KEYRING_USER,
                             base64.urlsafe_b64encode(raw).decode())
+            _backend_used = "os-keychain"
             return raw
-        except Exception:
-            pass
+        except Exception as e:
+            # The keyring is installed but didn't work (a locked or refused keychain, no
+            # Secret Service). Use the key file, but leave a trace, and let Settings say
+            # "local file" rather than claim the keychain is in use.
+            logging.getLogger(__name__).warning(
+                "The system keychain didn't work (%s); using the key file instead.", e)
+    _backend_used = "local-file"
     f = _key_file()
     if f.exists():
         return base64.urlsafe_b64decode(f.read_bytes())
@@ -74,12 +88,14 @@ def _load_or_create_key() -> bytes:
     f.write_bytes(base64.urlsafe_b64encode(raw))
     try:
         os.chmod(f, stat.S_IRUSR | stat.S_IWUSR)
-    except Exception:
+    except Exception:  # nosec B110  # a filesystem without owner-only modes; the folder is the user's own
         pass
     return raw
 
 
 def storage_backend() -> str:
+    if _backend_used:
+        return _backend_used
     return "os-keychain" if _try_keyring() else "local-file"
 
 

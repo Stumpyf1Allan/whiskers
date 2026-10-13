@@ -226,8 +226,8 @@ def _persist():
         tmp = _state_file().with_suffix(".tmp")
         tmp.write_text(json.dumps(blob, indent=2), encoding="utf-8")
         tmp.replace(_state_file())
-    except Exception:
-        pass                 # A state file that will not write is not worth a crash.
+    except Exception:  # nosec B110  # a state file that will not write is not worth a crash
+        pass
 
 
 def state() -> dict:
@@ -275,7 +275,7 @@ def _open(url: str, timeout: float):
         "User-Agent": USER_AGENT,
         "Accept": "application/json, application/octet-stream, */*",
     })
-    return urllib.request.urlopen(req, timeout=timeout)
+    return urllib.request.urlopen(req, timeout=timeout)  # nosec B310  # https only, checked above
 
 
 def _host_allowed(download_url: str, manifest: str) -> bool:
@@ -480,7 +480,7 @@ def download() -> dict:
         # Not executed by the app, but a downloaded program the person is being asked
         # to run should at least be runnable without a chmod on macOS and Linux.
         if platform_key() != "windows":
-            os.chmod(target, 0o755)
+            os.chmod(target, 0o700)          # runnable by its owner, nobody else
     except OSError:
         pass
     _set(status="ready", file=str(target), progress=1.0, error="")
@@ -550,7 +550,7 @@ def start_up(delay: float = 4.0):
         time.sleep(delay)
         try:
             check()
-        except Exception:
+        except Exception:  # nosec B110  # a background check must never stop the app
             pass
 
     _run("startup", later)

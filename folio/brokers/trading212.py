@@ -338,7 +338,7 @@ def sync(platform_id: int, history: bool = True, progress=None) -> dict:
                 (platform_id, iid, p["quantity"], p["cost_gbp"], p["value_gbp"],
                  p["price"], p["currency"], now, now))
         q = ",".join("?" * len(keep)) or "NULL"
-        c.execute(f"DELETE FROM positions WHERE platform_id=? AND source='api' "
+        c.execute(f"DELETE FROM positions WHERE platform_id=? AND source='api' "  # nosec B608  # only ? placeholders
                   f"AND instrument_id NOT IN ({q})", (platform_id, *keep))
         c.execute("UPDATE platforms SET cash=COALESCE(?, cash), cash_as_of=?, cash_source="
                   "CASE WHEN ? IS NULL THEN cash_source ELSE 'api' END, reported_total=?,"

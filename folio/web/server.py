@@ -216,7 +216,7 @@ def api_patch_instrument(req, m, q, body):
     if not changes:
         raise ApiError("Nothing to change.")
     sets = ", ".join(f"{k}=?" for k in changes)
-    db.execute(f"UPDATE instruments SET {sets} WHERE id=?", (*changes.values(), iid))
+    db.execute(f"UPDATE instruments SET {sets} WHERE id=?", (*changes.values(), iid))  # nosec B608  # columns from INSTRUMENT_FIELDS
     if changes.get("market_symbol"):
         threading.Thread(target=store.fetch_one, args=(store.sec_key(changes["market_symbol"]),),
                          kwargs={"force": True}, daemon=True).start()
@@ -577,7 +577,7 @@ def api_patch_platform(req, m, q, body):
         vals += [cash, db.now(), "manual" if cash is not None else None]
     if not sets:
         raise ApiError("Nothing to change.")
-    db.execute(f"UPDATE platforms SET {', '.join(sets)} WHERE id=?", (*vals, pid))
+    db.execute(f"UPDATE platforms SET {', '.join(sets)} WHERE id=?", (*vals, pid))  # nosec B608  # fixed column names
     return {"ok": True}
 
 
@@ -676,7 +676,7 @@ def api_add_sleeve(req, m, q, body):
         if f.get("is_cash"):
             c.execute("UPDATE sleeves SET is_cash=0")
         cols = list(f) + ["sort"]
-        cur = c.execute(f"INSERT INTO sleeves({','.join(cols)}) VALUES({','.join('?' * len(cols))})",
+        cur = c.execute(f"INSERT INTO sleeves({','.join(cols)}) VALUES({','.join('?' * len(cols))})",  # nosec B608  # columns from _sleeve_fields
                         (*f.values(), (c.execute("SELECT COALESCE(MAX(sort),0)+1 FROM sleeves")
                                        .fetchone()[0])))
     return {"ok": True, "id": cur.lastrowid}
@@ -693,7 +693,7 @@ def api_patch_sleeve(req, m, q, body):
     with db.tx() as c:
         if f.get("is_cash"):
             c.execute("UPDATE sleeves SET is_cash=0 WHERE id!=?", (sid,))
-        c.execute(f"UPDATE sleeves SET {', '.join(f'{k}=?' for k in f)} WHERE id=?", (*f.values(), sid))
+        c.execute(f"UPDATE sleeves SET {', '.join(f'{k}=?' for k in f)} WHERE id=?", (*f.values(), sid))  # nosec B608  # columns from _sleeve_fields
     return {"ok": True}
 
 
@@ -886,18 +886,18 @@ def api_open_data(req, m, q, body):
 
 
 def _open_path(target: pathlib.Path) -> dict:
-    import subprocess
+    import subprocess  # nosec B404  # argument lists only, never a shell
     import sys
     if config.android():
         return {"opened": False, "path": str(target),
                 "problem": "On the phone, Whiskers' folder is private to the app."}
     try:
         if os.name == "nt":
-            os.startfile(str(target))                # noqa: S606 — a folder we chose
+            os.startfile(str(target))  # noqa: S606  # nosec B606  # a folder we chose
         elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(target)])
+            subprocess.Popen(["open", str(target)])  # nosec B603 B607  # macOS's opener, a folder we chose
         else:
-            subprocess.Popen(["xdg-open", str(target)])
+            subprocess.Popen(["xdg-open", str(target)])  # nosec B603 B607  # the desktop's opener, a folder we chose
         return {"opened": True, "path": str(target)}
     except Exception as e:
         return {"opened": False, "problem": str(e), "path": str(target)}
