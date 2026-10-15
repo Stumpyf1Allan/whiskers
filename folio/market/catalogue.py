@@ -233,8 +233,9 @@ REFERENCE: dict[str, dict] = {
         why="Above 3% means markets doubt inflation will return to target."),
     "UKCPI": dict(
         label="UK consumer prices", unit="", group="rates", hidden=True, on_demand=True,
-        sources=[("fred", "GBRCPIALLMINMEI")], sleeve_words=[],
-        blurb="The UK consumer price index, monthly.",
+        sources=[("ons", "economy/inflationandpriceindices/timeseries/d7bt/mm23"),
+                 ("fred", "GBRCPIALLMINMEI")], sleeve_words=[],
+        blurb="The UK consumer price index (CPI, 2015 = 100), monthly, from the Office for National Statistics.",
         why="Read as the rise over twelve months: the inflation rate."),
     "UKPROP": dict(
         label="UK property shares (in £)", unit="£", group="sectors", hidden=True, on_demand=True,

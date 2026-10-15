@@ -274,6 +274,36 @@ def _words(defn: dict, lvl: str, measure: float, pts: list, extra: dict) -> str:
     return f"{measure:.2f}{unit}{avg}: amber from {defn['amber']}{unit}, red from {defn['red']}{unit}"
 
 
+def _keys_of(ref) -> list[str]:
+    if isinstance(ref, tuple):
+        if ref and ref[0] in ("SEC", "BASKET"):
+            return [store.sec_key(r) for r in ref[1:]]
+        return [store.ref_key(r) for r in ref]
+    return [store.ref_key(ref)]
+
+
+def stopped_updating(ref, pts: list[tuple[str, float]]) -> bool:
+    """True when a fetch succeeded recently but the series' last figure is far older than
+    its usual gap allows: the source has stopped publishing it (FRED's copy of UK CPI
+    stopped in March 2025, for one). Judged only when the last good fetch is known, so a
+    computer that was simply switched off for a month isn't accused of it."""
+    if len(pts) < 3:
+        return False
+    fetched = [m.get("last_ok") for m in (store.meta(k) or {} for k in _keys_of(ref)) if m.get("last_ok")]
+    if not fetched:
+        return False
+    try:
+        last_ok = max(dt.datetime.fromisoformat(f[:19]).date() for f in fetched)
+        last = dt.date.fromisoformat(pts[-1][0][:10])
+        recent = [dt.date.fromisoformat(d[:10]) for d, _ in pts[-7:]]
+    except ValueError:
+        return False
+    gaps = sorted((b - a).days for a, b in zip(recent, recent[1:]))
+    gap = gaps[len(gaps) // 2] if gaps else 1
+    allowed = 30 if gap <= 7 else 110 if gap <= 40 else 200      # daily, monthly, quarterly
+    return (last_ok - last).days > allowed
+
+
 def reading(defn: dict) -> dict:
     pts = _series(defn["ref"])
     base = {"key": defn["key"], "title": defn["title"], "sub": defn["sub"], "group": defn["group"],
@@ -287,6 +317,11 @@ def reading(defn: dict) -> dict:
             keys = [store.ref_key(r) for r in refs]
         errs = [(store.meta(k) or {}).get("last_error") for k in keys]
         base["words"] = next((e for e in errs if e), "Not fetched yet.")
+        return base
+    if stopped_updating(defn["ref"], pts):
+        base["as_of"] = pts[-1][0]
+        base["words"] = (f"Its source hasn't published a new figure since {_day(pts[-1][0])}, so this "
+                         "light is left out rather than shown as though it were current.")
         return base
     lv = levels_for(defn, pts)
     if not lv:

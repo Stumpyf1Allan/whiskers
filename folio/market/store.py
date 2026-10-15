@@ -155,6 +155,8 @@ def _fetch(kind: str, ident: str, rng: str) -> dict:
         return {"points": pts, "currency": None, "name": None, "live": None, "live_at": None}
     if kind == "stooq":
         return sources.stooq(ident, config.settings.get("stooq_key") or "")
+    if kind == "ons":
+        return sources.ons(ident)
     raise sources.SourceError(f"unknown source {kind}")
 
 

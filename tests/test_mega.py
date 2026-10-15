@@ -358,6 +358,40 @@ def test_the_budget_counts_on_overall_only_when_it_is_switched_on():
     assert "budget" in keys()
 
 
+# ============================================================================ market data that stops
+
+def test_ons_monthly_series_are_read_and_odd_rows_skipped():
+    from folio.market import sources
+    payload = {"description": {"cdid": "D7BT"}, "years": [{"date": "2025", "value": "138.2"}],
+               "months": [{"date": "2026 JUL", "value": "141.0"}, {"date": "2026 AUG", "value": "141.4"},
+                          {"date": "2026 SEP", "value": ""}, {"date": "rubbish", "value": "1"}]}
+    assert sources.parse_ons_json(payload) == [("2026-07-01", 141.0), ("2026-08-01", 141.4)]
+    with pytest.raises(sources.SourceError):
+        sources.parse_ons_json({"years": []})
+
+
+def test_a_light_whose_source_stopped_publishing_is_left_out_not_shown_as_current():
+    from folio.engine import signals, themes
+    from folio.market import store
+    defn = next(d for d in themes.lights_for("inflation") if d["key"] == "uk_cpi")
+    key = store.ref_key("UKCPI")
+
+    def monthly(end: dt.date, n: int = 30):
+        out, y, m = [], end.year, end.month
+        for i in range(n):
+            out.append((f"{y:04d}-{m:02d}-01", 100.0 + (n - i) * 0.3))
+            y, m = (y - 1, 12) if m == 1 else (y, m - 1)
+        return sorted(out)
+
+    store._save(key, {"points": monthly(dt.date(2025, 3, 1))}, "fred:GBRCPIALLMINMEI", replace=True)
+    r = signals.reading(defn)
+    assert r["level"] == "none" and "1 Mar 2025" in r["words"]
+    # a figure from last month is what a monthly series normally looks like
+    last_month = (dt.date.today().replace(day=1) - dt.timedelta(days=1)).replace(day=1)
+    store._save(key, {"points": monthly(last_month)}, "ons:test", replace=True)
+    assert signals.reading(defn)["level"] in ("green", "amber", "red")
+
+
 # ============================================================================ the sample household
 
 def test_the_sample_household_comes_out_completely_and_keeps_your_own_details():

@@ -16,6 +16,9 @@ Checked in September 2026:
   most important warning lights still work.
 * **Stooq** — required an API key from April 2026 (obtained through a captcha on their
   site). Used only if one has been pasted into Settings.
+* **ONS** (Office for National Statistics) — each time series page answers JSON at its
+  address plus `/data`. Used for UK consumer prices, because FRED's copy of them stopped
+  in March 2025 (checked 15 October 2026). Keyless.
 
 The parse_* functions take the raw reply and nothing else, so the tests can feed them
 recorded payloads without touching the network.
@@ -37,6 +40,7 @@ from .. import config, net
 YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range={rng}&interval=1d"
 FRED_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}"
 STOOQ_CSV = "https://stooq.com/q/d/l/?s={sym}&i=d&apikey={key}"
+ONS_JSON = "https://www.ons.gov.uk/{path}/data"
 
 
 class SourceError(Exception):
@@ -153,6 +157,39 @@ def fred(series_id: str) -> dict:
         raise SourceError("FRED sent a web page instead of data — the series may have moved")
     return {"points": parse_fred_csv(text), "currency": None, "name": None,
             "live": None, "live_at": None}
+
+
+# ---------------------------------------------------------------------------- ONS
+
+_MONTH_NO = {m: i for i, m in enumerate(("JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+                                         "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"), 1)}
+
+
+def parse_ons_json(payload: dict) -> list[tuple[str, float]]:
+    """An ONS time series: its "months" list, each {"date": "2026 AUG", "value": "141.2",
+    ...}, dated here as the first of the month. Quarters and years are ignored."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("months"), list):
+        raise SourceError("ONS sent back something that isn't a monthly time series")
+    pts = []
+    for row in payload["months"]:
+        try:
+            year, mon = str(row.get("date") or "").split()
+            pts.append((f"{int(year):04d}-{_MONTH_NO[mon[:3].upper()]:02d}-01", float(row["value"])))
+        except (KeyError, ValueError, TypeError, AttributeError):
+            continue
+    return _clean(sorted(pts))
+
+
+def ons(path: str) -> dict:
+    try:
+        body = net.get(ONS_JSON.format(path=path.strip("/")), timeout=25)
+    except net.FetchError as e:
+        raise SourceError(f"ONS: {e}") from None
+    try:
+        payload = json.loads(body.decode("utf-8", "replace"))
+    except ValueError:
+        raise SourceError("ONS sent a web page instead of data — the series may have moved") from None
+    return {"points": parse_ons_json(payload), "currency": None, "name": None, "live": None, "live_at": None}
 
 
 # ---------------------------------------------------------------------------- Stooq
