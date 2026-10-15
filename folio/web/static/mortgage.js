@@ -70,8 +70,11 @@ function mortgagePanel(s, d, stopAge, dob) {
         <span class="tiny muted">${s.estimated && s.projected_months ? `projected from ${fmtDate(s.confirmed_on)}` : s.confirmed_on ? `as at ${fmtDate(s.confirmed_on)}` : 'no balance yet'}</span></div>
       <div class="stat"><span class="k">Monthly payment</span><span class="v">${m(s.monthly_payment, { dp: 2 })}</span>
         <span class="tiny muted">${known(s.interest_this_month) && known(s.capital_this_month) ? `${m(s.interest_this_month, { dp: 0 })} interest, ${m(s.capital_this_month, { dp: 0 })} off the balance` : s.repayment_type === 'interest_only' ? 'interest only' : '—'}</span></div>
-      <div class="stat"><span class="k">Clears</span><span class="v">${s.payoff_on ? monthYear(s.payoff_on) : '—'}</span>
-        <span class="tiny muted">${known(s.months_left) ? `${Math.round(s.months_left / 12 * 10) / 10} years from now` : 'needs a rate and a payment'}${known(s.paid_off) ? `, ${pct(s.paid_off, { dp: 0 })} paid off` : ''}</span></div>
+      ${s.repayment_type === 'interest_only'
+        ? `<div class="stat"><span class="k">Term ends</span><span class="v">${s.payoff_on ? monthYear(s.payoff_on) : '—'}</span>
+        <span class="tiny muted">${known(s.balance) && s.payoff_on ? `${m(s.balance, { dp: 0 })} to repay then` : 'add when it started and its term'}</span></div>`
+        : `<div class="stat"><span class="k">Clears</span><span class="v">${s.payoff_on ? monthYear(s.payoff_on) : '—'}</span>
+        <span class="tiny muted">${known(s.months_left) ? `${Math.round(s.months_left / 12 * 10) / 10} years from now` : 'needs a rate and a payment'}${known(s.paid_off) ? `, ${pct(s.paid_off, { dp: 0 })} paid off` : ''}</span></div>`}
       <div class="stat"><span class="k">${known(s.equity) ? 'Your equity' : 'Interest still to pay'}</span><span class="v">${m(known(s.equity) ? s.equity : s.interest_remaining, { dp: 0 })}</span>
         <span class="tiny muted">${known(s.ltv) ? `${pct(s.ltv, { dp: 0 })} loan to value` : known(s.interest_remaining) ? 'over the rest of the term' : 'add the home’s value for equity'}</span></div>
     </div>
@@ -80,7 +83,7 @@ function mortgagePanel(s, d, stopAge, dob) {
     ${s.term_mismatch ? `<p class="warnline">At this payment it clears in ${monthYear(s.term_mismatch.payoff_on)}, but the term ends ${monthYear(s.term_mismatch.term_ends_on)}, ${s.term_mismatch.months} months apart. Either the payment or the rate on file isn’t right.</p>` : ''}
     ${s.ahead_by_months ? `<p class="small">About ${Math.round(s.ahead_by_months / 12 * 10) / 10} years ahead of the original term.</p>` : ''}
     <div class="grid g2">
-      <div><h3>How it runs down</h3><div style="margin-top:6px">${chart}</div>
+      <div><h3>${s.repayment_type === 'interest_only' ? 'The balance (interest only: it stays put until the term ends)' : 'How it runs down'}</h3><div style="margin-top:6px">${chart}</div>
         ${known(s.interest_remaining) ? `<p class="chart-note">${m(s.interest_remaining, { dp: 0 })} of interest still to pay at today’s rate and payment.</p>` : ''}</div>
       <div><h3>Where each year’s payments go</h3><div style="margin-top:6px">${split || '<p class="small muted">Needs a rate and a payment.</p>'}</div>
         ${split ? '<div class="legend" style="margin-top:4px"><span><i style="background:var(--accent)"></i>Off the balance</span><span><i style="background:var(--amber)"></i>Interest</span></div>' : ''}</div>
@@ -131,7 +134,9 @@ ACTS['mort-over'] = async b => {
   if (!(amt > 0)) { toast('Type an amount first.', true); return; }
   await busy(b, async () => {
     const r = await api(`/api/mortgages/${id}/overpayment?amount=${amt}&kind=${$(`#mo-kind-${id}`).value}`);
-    $(`#mo-out-${id}`).innerHTML = r.available ? `<div class="plan-box" style="margin-top:4px"><b>${money(r.interest_saved, { dp: 0 })}</b> less interest, and <b>${plural(r.months_saved, 'month')}</b> sooner: clear by ${monthYear(r.new_payoff_on)} instead of ${monthYear(r.old_payoff_on)}.
+    $(`#mo-out-${id}`).innerHTML = r.available ? `<div class="plan-box" style="margin-top:4px">${r.interest_only
+      ? `<b>${money(r.interest_saved, { dp: 0 })}</b> less interest, and <b>${money(r.end_balance_after, { dp: 0 })}</b> left to repay when the term ends${r.term_ends_on ? ` in ${monthYear(r.term_ends_on)}` : ''}, instead of ${money(r.end_balance_before, { dp: 0 })}.`
+      : `<b>${money(r.interest_saved, { dp: 0 })}</b> less interest, and <b>${plural(r.months_saved, 'month')}</b> sooner: clear by ${monthYear(r.new_payoff_on)} instead of ${monthYear(r.old_payoff_on)}.`}
       <div class="tiny muted" style="margin-top:4px">${esc(r.caveat)}</div></div>` : `<p class="muted">${esc(r.why)}</p>`;
   });
 };

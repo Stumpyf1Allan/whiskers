@@ -319,6 +319,8 @@ def overpayment_effect(m: dict, amount: float, kind: str = "monthly",
     on = on or dt.date.today()
     base = summarise(m, on)
     balance, payment = base["balance"], base["monthly_payment"]
+    if base["repayment_type"] == "interest_only" and balance:
+        return _interest_only_overpayment(m, base, amount, kind)
     if balance is None or not payment or base["repayment_type"] == "interest_only":
         return {"available": False,
                 "why": "Add a balance and a monthly payment first, then this can work out "
@@ -359,6 +361,32 @@ def overpayment_effect(m: dict, amount: float, kind: str = "monthly",
     }
 
 
+def _interest_only_overpayment(m: dict, base: dict, amount: float, kind: str) -> dict:
+    """On an interest-only mortgage nothing shortens: an overpayment cuts what is left to
+    repay at the end, and the interest on what it cleared."""
+    amount = abs(float(amount or 0))
+    if amount <= 0:
+        return {"available": False, "why": "Enter an amount to overpay."}
+    balance, r = float(base["balance"]), monthly_rate(m["rate"])
+    months = base["months_left"]
+    if not months:
+        return {"available": False,
+                "why": "Add when the mortgage started and its term, so the end of it is known."}
+    saved, cleared = 0.0, 0.0
+    for _ in range(int(months)):
+        cleared = min(balance, cleared + amount) if kind == "monthly" else min(balance, amount)
+        saved += cleared * r
+    return {
+        "available": True, "kind": kind, "amount": round(amount, 2), "interest_only": True,
+        "interest_saved": round(saved, 2), "months_saved": 0,
+        "end_balance_before": round(balance, 2), "end_balance_after": round(balance - cleared, 2),
+        "term_ends_on": base["term_ends_on"],
+        "new_payment": round((base["monthly_payment"] or 0) + (amount if kind == "monthly" else 0), 2),
+        "caveat": "Most lenders cap penalty-free overpayments (often 10% of the balance a "
+                  "year) while you're on a fixed rate. Check yours before setting this up.",
+    }
+
+
 def rate_change_effect(m: dict, new_rate: float, on: dt.date | None = None) -> dict:
     """What the payment becomes when the fix ends — the question behind the date."""
     on = on or dt.date.today()
@@ -367,13 +395,15 @@ def rate_change_effect(m: dict, new_rate: float, on: dt.date | None = None) -> d
     if balance is None:
         return {"available": False}
     months_left = base["months_left"]
-    if not months_left:
+    interest_only = m["repayment_type"] == "interest_only"
+    if not months_left and not interest_only:
         if m["term_months"] and m["started_on"]:
             months_left = max(m["term_months"] - _months_between(_d(m["started_on"]), on), 1)
         else:
             return {"available": False}
     now = base["monthly_payment"]
-    then = (balance * monthly_rate(new_rate) if m["repayment_type"] == "interest_only"
+    # Interest-only: the payment is the interest, whatever the term.
+    then = (balance * monthly_rate(new_rate) if interest_only
             else payment_for(balance, new_rate, months_left))
     return {"available": True, "new_rate": new_rate,
             "payment_now": round(now, 2) if now else None,

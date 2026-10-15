@@ -94,6 +94,18 @@ def test_a_payment_that_doesnt_cover_the_interest_is_said_so():
     assert s["never_clears"] is True
 
 
+def test_an_interest_only_overpayment_cuts_what_is_left_at_the_end():
+    start = dt.date.today().replace(day=1)
+    mid = _mortgage(repayment_type="interest_only", statement_balance=120000, monthly_payment=500, rate=5.0,
+                    started_on=start.replace(year=start.year - 5).isoformat(), term_months=120)
+    m = mort.get(mid)
+    r = mort.overpayment_effect(m, 200, "monthly")
+    assert r["available"] and r["interest_only"]
+    assert r["end_balance_after"] == pytest.approx(120000 - 200 * 60)
+    assert r["interest_saved"] == pytest.approx(200 * 5 / 1200 * 60 * 61 / 2, abs=1)
+    assert mort.rate_change_effect(m, 6.0)["payment_then"] == pytest.approx(600)
+
+
 def test_a_rate_rise_raises_the_payment():
     r = mort.rate_change_effect(mort.get(_mortgage()), 6.0)
     assert r["available"] and r["payment_then"] > r["payment_now"]
