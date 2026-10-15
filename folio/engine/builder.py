@@ -959,7 +959,15 @@ def review_pack() -> str:
         lines += ["", "### Theses", ""]
         for t in th:
             lines += [f"**{t['name']}** ({t['verdict'] or 'no verdict'}; next check {t['next_check'] or 'not set'})",
-                      f"- Why: {t['why'] or ''}", f"- What would change my mind: {t['breakers'] or ''}", ""]
+                      f"- Why: {t['why'] or ''}", f"- What would change my mind: {t['breakers'] or ''}"]
+            try:
+                fg = json.loads(t["factors"]) if t["factors"] else {}
+            except ValueError:
+                fg = {}
+            grades = ", ".join(f"{k} {v}" for k, v in fg.items() if k != "on")
+            if grades:
+                lines.append(f"- Factor grades ({fg.get('on', 'undated')}): {grades}")
+            lines.append("")
     try:
         m = signals.evaluate()
         lines += ["", "## Warning lights", "", f"Reading: {m['label']}.", ""]
@@ -968,6 +976,10 @@ def review_pack() -> str:
     except Exception as e:
         # Offline, or before the first refresh: the pack still goes, and says what's missing.
         lines += ["", "## Warning lights", "", f"Not available when this was made ({e}).", ""]
+    from . import valuations
+    typed = valuations.lines()
+    if typed:
+        lines += ["", "## Valuations, typed in by hand", ""] + typed
     lines += ["", "## Answers", "", "```json", json.dumps(d["answers"], indent=1, default=str), "```", "",
               "Not financial advice."]
     return "\n".join(lines)

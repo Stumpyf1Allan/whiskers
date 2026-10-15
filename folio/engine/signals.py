@@ -423,6 +423,28 @@ def evaluate(w: dict | None = None) -> dict:
                                         "chosen_at": w.get("chosen_at")}}
 
 
+def moved_outside(w: dict | None = None) -> list[dict]:
+    """Themes nobody is watching whose own lights have turned red, read from series already
+    on this computer (nothing extra is fetched for them). They never move the dial; Market
+    watch lists them so that nothing big goes unseen."""
+    from . import themes
+    w = w or themes.watch()
+    watched = set(w.get("themes") or []) | ({"ai"} if w.get("legacy") else set())
+    out = []
+    for key in themes.LIBRARY:
+        if key in watched or key == "rand":
+            continue
+        reds = []
+        for d in themes.lights_for(key):
+            r = reading(d)
+            if r["level"] == "red":
+                reds.append({"title": r["title"], "since": r.get("since")})
+        if reds:
+            out.append({"theme": key, "title": themes.title(key), "reds": reds,
+                        "since": min((x["since"] for x in reds if x["since"]), default=None)})
+    return sorted(out, key=lambda x: x["since"] or "9999")
+
+
 def group_reading(levels: list[str], group: str, n: int = 4) -> dict:
     """One word for one group of lights. A theme uses the same words as the overall
     reading, turning at half its worst; the economy's gauges move slowly, so any red there

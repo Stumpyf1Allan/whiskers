@@ -325,6 +325,8 @@ ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("instruments", "asset_class", "TEXT"),      # equity | bond | linker | cash | gold | commodity | property | crypto | mixed
     ("instruments", "duration", "REAL"),         # a bond fund's duration, years
     ("instruments", "ocf", "REAL"),              # a fund's yearly charge, %
+    # 2.0: a thesis's factor grades, typed in during a review (JSON: grades and the date)
+    ("theses", "factors", "TEXT"),
 ]
 
 _init_lock = threading.Lock()

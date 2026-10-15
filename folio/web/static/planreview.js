@@ -26,7 +26,8 @@ async function vPlan(el) {
     <div class="spread"><div class="small muted">${done} of ${total} questions answered${prog.updated ? `, last on ${fmtDate(prog.updated)}` : ''}${prog.applied ? `. Plan last used ${fmtDate(prog.applied)}.` : '.'}</div>
       <div class="row wrap"><button class="btn ${S.planMode === 'draft' ? 'primary' : ''}" data-act="plan-mode" data-v="draft">See the plan it builds</button>
         <button class="btn ${S.planMode === 'written' ? 'primary' : ''}" data-act="plan-mode" data-v="written">The written plan</button>
-        <button class="btn ghost" data-act="plan-pack">Download the review pack</button></div></div>
+        <button class="btn ghost" data-act="plan-pack">Download the review pack</button>
+        <button class="btn ghost" data-act="glossary">Words explained</button></div></div>
     <div class="wizard">
       <nav class="parts" aria-label="Parts of the review">${d.parts.map(partBtn).join('')}
         <button type="button" class="${S.planMode === 'draft' ? 'on' : ''}" data-act="plan-mode" data-v="draft"><span class="n">→</span><span>The plan</span><span class="count"></span></button></nav>

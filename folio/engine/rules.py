@@ -143,6 +143,32 @@ def _regime_since(market: dict) -> str:
     return f" The lights have read like this since {_day(strip[i][0])}."
 
 
+def _watch_moved(pos: list[dict], totals: dict) -> dict | None:
+    """When the money has moved on from the main watch, ask; never switch by itself. Only
+    for a watch the plan review chose from what was held: a theme somebody picked by name,
+    and the original AI watch, are theirs to keep."""
+    from . import themes
+    try:
+        w = themes.watch()
+        answers = (db.get_meta("builder", {}) or {}).get("answers") or {}
+        cur = w.get("main")
+        if w.get("legacy") or not cur or answers.get("main_theme") not in (None, "", "auto"):
+            return None
+        sug = themes.suggest(pos, totals)
+    except Exception as e:                    # a suggestion is never worth a broken screen
+        db.log("rules.watch", str(e))
+        return None
+    by = {e["theme"]: e.get("pct") or 0.0 for e in sug.get("exposures") or []}
+    new = sug.get("main")
+    if not new or new == cur or new not in themes.LIBRARY or by.get(new, 0.0) - by.get(cur, 0.0) < 0.05:
+        return None
+    return {"id": f"watch:{new}", "level": "info", "kind": "market",
+            "title": f"{themes.title(new)} is now {by[new] * 100:.0f}% of your money; "
+                     f"{themes.lower_first(themes.title(cur))}, your main watch, {by.get(cur, 0.0) * 100:.0f}%",
+            "detail": f"Make {themes.lower_first(themes.title(new))} your main watch? Nothing changes unless "
+                      "you choose to: Market watch, then Change what you watch.", "go": "ai"}
+
+
 def evaluate(pos: list[dict], totals: dict, alloc: dict, exp: dict | None = None,
              market: dict | None = None, playbook: dict | None = None,
              holding_targets: list[dict] | None = None) -> list[dict]:
@@ -246,6 +272,10 @@ def evaluate(pos: list[dict], totals: dict, alloc: dict, exp: dict | None = None
                         f"{x['title'].lower()} {x['level']} since {_day(x['since'])}" for x in econ),
                     "detail": "Slow gauges of a downturn building. They describe the economy, not "
                               "prices, and have given false alarms as well as true ones.", "go": "ai"})
+
+    w = _watch_moved(pos, totals)
+    if w:
+        out.append(w)
 
     # Gaps in the data: each of these makes some figure above less true.
     unassigned = [x for x in pos if x["sleeve_id"] is None]

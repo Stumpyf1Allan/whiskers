@@ -285,7 +285,7 @@ const PENSION_HELP = {
   db: 'A promise of so much a year for life, like the NHS, teachers’ or civil service schemes. Its yearly statement gives the pension built up so far.',
   dc: 'A pot of money invested for you: a workplace pension or a personal pension. Its statement gives the value of the pot.',
   annuity: 'An income already bought with a pension pot.',
-  sa_ra: 'A South African retirement annuity, in rand. It counts at today’s exchange rate.',
+  sa_ra: 'A South African retirement annuity, in rand. It counts at today’s exchange rate, and the plan takes it as cash when it starts. Once you have been non-resident in South Africa for tax for three unbroken years, the whole annuity can usually be taken out; until then, usually not before 55.',
 };
 
 async function vPensions(el) {
@@ -310,6 +310,7 @@ async function vPensions(el) {
       <li>From 6 April 2027, money left in a pension pot when you die counts towards inheritance tax. A nomination tells each scheme who should receive it; a will doesn’t always reach a pension.</li>
       <li>Most people can take a quarter of a pot tax-free, up to £268,275 across all of them. The rest is taxed as income when it comes out.</li>
       <li>The earliest age a pot can be touched rises from 55 to 57 on 6 April 2028.</li>
+      ${d.items.some(p => p.kind === 'sa_ra') ? '<li>A South African retirement annuity can usually be taken out in full once you have been non-resident in South Africa for tax for three unbroken years, counted from when your residency ended. The fund asks SARS for a tax directive first, and South African tax on it isn’t modelled here.</li>' : ''}
       <li>Pension Wise gives free, impartial guidance to anyone 50 or over: <a href="https://www.moneyhelper.org.uk/en/pensions-and-retirement/pension-wise">moneyhelper.org.uk</a>. Lost track of an old workplace pension? <a href="https://www.gov.uk/find-pension-contact-details">gov.uk’s Pension Tracing Service</a> finds it.</li>
     </ul></section>
   </div>`;

@@ -377,6 +377,14 @@ def api_new_money(req, m, q, body):
 
 # ============================================================================ AI watch
 
+def _moved(w: dict) -> list[dict]:
+    try:
+        return signals.moved_outside(w)
+    except Exception as e:                    # a side note is never worth a broken screen
+        db.log("signals.moved", str(e))
+        return []
+
+
 @route("GET", "/api/ai")
 def api_ai(req, m, q, body):
     pos, tot, alloc, exp, market, warns, back, pb, ht = _everything()
@@ -402,7 +410,7 @@ def api_ai(req, m, q, body):
             "dotcom": stress.DOTCOM, "worst": back.get("worst"), "playbook": pb,
             "narratives": narrative.watch(market, pb),
             "coverage": back["coverage"], "cap": cap, "theme_exposure": theme_exp,
-            "replays": replays, "standard": stress.standard(pos, tot),
+            "replays": replays, "standard": stress.standard(pos, tot), "moved": _moved(w),
             "library": [{"key": k, "label": v["label"], "about": v["about"]} for k, v in themes.LIBRARY.items()]}
 
 

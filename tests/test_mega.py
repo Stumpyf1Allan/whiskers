@@ -392,6 +392,71 @@ def test_a_light_whose_source_stopped_publishing_is_left_out_not_shown_as_curren
     assert signals.reading(defn)["level"] in ("green", "amber", "red")
 
 
+def test_valuations_typed_by_hand_keep_their_date_and_age():
+    from folio.engine import valuations
+    old = (dt.date.today() - dt.timedelta(days=200)).isoformat()
+    v = valuations.save({"cape_us": {"value": "38.4", "on": old, "note": "multpl"}, "erp": {"value": "4.1%"}})
+    assert v["cape_us"]["value"] == 38.4 and v["cape_us"]["old"] and not v["erp"]["old"]
+    with pytest.raises(valuations.ValuationError):
+        valuations.save({"fpe_us": {"value": "lots"}})
+    with pytest.raises(valuations.ValuationError):
+        valuations.save({"fpe_us": {"value": "21", "on": "2999-01-01"}})
+    assert "erp" not in valuations.save({"erp": {"value": ""}})          # a blank clears it
+    assert any("CAPE" in x and "now old" in x for x in valuations.lines())
+    assert "Valuations, typed in by hand" in builder.review_pack()
+
+
+def test_the_app_asks_before_moving_the_main_watch_and_never_when_it_was_picked():
+    from folio.engine import portfolio, rules, themes
+    pid = add_platform(cash=0.0)
+    add_position(pid, "SGLN", exchange="LSE", name="iShares Physical Gold ETC", broker_value=6000.0, valued_at=db.now())
+    add_position(pid, "IGLT", exchange="LSE", name="iShares Core UK Gilts UCITS ETF", broker_value=3000.0,
+                 valued_at=db.now())
+    pos = portfolio.positions()
+    tot = portfolio.totals(pos)
+    assert rules._watch_moved(pos, tot) is None                  # the original AI watch is left alone
+    themes.set_watch("rates", ["rates", "gold"], None)
+    db.set_meta("builder", {"answers": {"main_theme": "auto"}, "at": {}, "mood": {}})
+    w = rules._watch_moved(pos, tot)
+    assert w and w["level"] == "info" and "Make gold your main watch?" in w["detail"]
+    db.set_meta("builder", {"answers": {"main_theme": "rates"}, "at": {}, "mood": {}})
+    assert rules._watch_moved(pos, tot) is None                  # picked by name: theirs to keep
+
+
+def test_the_mortgage_tile_says_whether_it_outlives_work():
+    from folio.engine import overall
+    retirement.save({"dob": _years_ago(55), "stop_age": 60})
+    payoff = dt.date.today() + dt.timedelta(days=round(8 * 365.25))
+    assert overall._clear_by(payoff).endswith("3 years after you stop")
+    assert overall._clear_by(dt.date.today() + dt.timedelta(days=365)).endswith("before you stop")
+
+
+def test_a_theme_outside_the_watch_that_turns_red_is_listed_but_never_moves_the_dial():
+    from folio.engine import signals
+    from folio.market import store
+    from .test_whiskers import price_series
+    price_series(store.ref_key("BRENT"), [100.0] * 260 + [100.0 - i for i in range(1, 46)], currency="USD")
+    moved = signals.moved_outside()
+    oil = next((x for x in moved if x["theme"] == "oil"), None)
+    assert oil and any("fall" in r["title"].lower() for r in oil["reds"])
+    assert all(x["theme"] != "ai" for x in moved)              # the original watch is watched
+    assert "oil" not in signals.evaluate()["groups"]          # and the dial never counts it
+
+
+def test_a_thesis_keeps_its_factor_grades_and_the_review_pack_shows_them():
+    from folio.web import routes2
+    pid = add_platform()
+    iid = add_position(pid, "AZN", exchange="LSE", name="AstraZeneca", broker_value=5000.0, valued_at=db.now())
+    routes2.api_save_thesis(None, {"iid": str(iid)}, {}, {"why": "Oncology pipeline", "breakers": "Pipeline fails",
+                            "factors": {"valuation": "C-", "growth": "A", "momentum": "Z", "nonsense": "A"}})
+    row = db.one("SELECT factors FROM theses WHERE instrument_id=?", (iid,))
+    f = json.loads(row["factors"])
+    assert f["valuation"] == "C-" and f["growth"] == "A" and "momentum" not in f and "nonsense" not in f and f["on"]
+    assert "Factor grades" in builder.review_pack()
+    routes2.api_save_thesis(None, {"iid": str(iid)}, {}, {"why": "Oncology pipeline", "factors": {}})
+    assert db.one("SELECT factors FROM theses WHERE instrument_id=?", (iid,))["factors"] is None
+
+
 # ============================================================================ the sample household
 
 def test_the_sample_household_comes_out_completely_and_keeps_your_own_details():

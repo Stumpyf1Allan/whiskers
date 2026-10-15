@@ -504,7 +504,7 @@ fieldset.wiz legend { font-weight: 600; padding: 0; margin-bottom: 6px; }
   #nav button { flex: none; width: auto; padding: 8px 10px; gap: 6px; }
   #nav .lbl { display: inline; font-size: .82rem; }
   #nav .dot { position: static; }
-  .rail-foot #help, .rail-foot #tour-btn { display: none; }
+  .rail-foot #help, .rail-foot #tour-btn, .rail-foot #words-btn { display: none; }
   .main { padding-bottom: 84px; }
   .toasts { bottom: 92px; }
 }
@@ -633,6 +633,8 @@ fieldset.wiz legend { font-weight: 600; padding: 0; margin-bottom: 6px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
 @media (max-width: 700px) { .form-grid { grid-template-columns: minmax(0, 1fr); } }
 .form-grid .full { grid-column: 1 / -1; }
+.val-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.4fr); padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+@media (max-width: 700px) { .val-row { grid-template-columns: minmax(0, 1fr); } }
 input[type=date] { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 6px 10px; min-width: 0; font: inherit; color: inherit; }
 
 /* ------------------------------------------------------------------ Import */
@@ -663,3 +665,9 @@ input[type=date] { border: 1px solid var(--line); background: var(--panel); bord
 .cat-bar .track { position: relative; height: 12px; background: var(--line-2); border-radius: 6px; overflow: hidden; }
 .cat-bar .track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; }
 @media (max-width: 760px) { .cat-bar { grid-template-columns: 1fr; } }
+
+/* Words explained (glossary.js) */
+.gloss-list { max-height: 60vh; overflow: auto; }
+.gloss { padding: 10px 0; border-bottom: 1px solid var(--line-2); display: grid; gap: 3px; }
+.gloss:last-child { border-bottom: 0; }
+.moved { margin-top: 8px; color: var(--mon-muted); }

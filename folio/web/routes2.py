@@ -13,7 +13,7 @@ import json
 
 from .. import config, db, inbox, reminders
 from ..engine import (builder, classify, mortgage as mort, overall, pensions as pens, phonecopy, portfolio,
-                      retirement, statepension, stress, themes, ukrules, xray)
+                      retirement, statepension, stress, themes, ukrules, valuations, xray)
 from ..importers import investments as inv
 from ..institutions import registry
 from .server import ApiError, _float, _int, route
@@ -436,6 +436,19 @@ def api_review_pack(req, m, q, body):
             "_name": f"{config.APP_FILE_NAME} review pack {db.today()}.md", "_type": "text/markdown"}
 
 
+@route("GET", "/api/valuations")
+def api_valuations(req, m, q, body):
+    return {"fields": valuations.FIELDS, "values": valuations.values(), "old_after_days": valuations.OLD_AFTER_DAYS}
+
+
+@route("PUT", "/api/valuations")
+def api_save_valuations(req, m, q, body):
+    try:
+        return {"ok": True, "values": valuations.save(body or {})}
+    except valuations.ValuationError as e:
+        raise ApiError(str(e)) from None
+
+
 @route("GET", "/api/xray")
 def api_xray(req, m, q, body):
     return xray.run(settings=retirement.settings())
@@ -533,7 +546,17 @@ def api_save_thesis(req, m, q, body):
                   "next_check=excluded.next_check, verdict=excluded.verdict, updated_at=excluded.updated_at",
                   (iid, str(b.get("why") or "")[:2000], str(b.get("breakers") or "")[:2000], nc,
                    verdict or None, db.now()))
+        if isinstance(b.get("factors"), dict):
+            grades = {k: str(v) for k, v in b["factors"].items() if k in FACTORS and str(v) in GRADES}
+            c.execute("UPDATE theses SET factors=? WHERE instrument_id=?",
+                      (json.dumps(grades | {"on": db.today()}) if grades else None, iid))
     return {"ok": True}
+
+
+#: Seeking Alpha's factor grades, typed in during a review: one line per thesis card.
+FACTORS = {"valuation": "Valuation", "growth": "Growth", "profitability": "Profitability",
+           "momentum": "Momentum", "revisions": "EPS revisions"}
+GRADES = ("A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "F")
 
 
 # ============================================================================ the catalogue and adding things

@@ -94,6 +94,24 @@ def tabs() -> dict:
             "retirement": bool(s.get("show_retirement")), "budget": bool(s.get("budget_on"))}
 
 
+def _clear_by(payoff: dt.date) -> str:
+    """'Clear by July 2039, 3 years after you stop': the question that matters is whether
+    the mortgage outlives the salary."""
+    words = "Clear by " + payoff.strftime("%B %Y")
+    s = retirement.settings()
+    dob = retirement.dob_of(s)
+    if not dob or not s.get("stop_age"):
+        return words
+    stop = dob + dt.timedelta(days=round(float(s["stop_age"]) * 365.25))
+    years = (payoff - stop).days / 365.25
+    if years >= 0.5:
+        n = round(years)
+        return words + f", {n} year{'s' if n != 1 else ''} after you stop"
+    if years <= -0.5:
+        return words + ", before you stop"
+    return words + ", about when you stop"
+
+
 def this_year(ret: dict | None, pb: dict | None) -> list[dict]:
     today = dt.date.today()
     out = []
@@ -135,6 +153,10 @@ def this_year(ret: dict | None, pb: dict | None) -> list[dict]:
         out.append({"when": today.isoformat(), "what": "Hand-filled signals are due",
                     "detail": "Update them on the Market watch screen after each earnings season.", "go": "ai"})
     b = db.get_meta("builder", {}) or {}
+    if (b.get("answers") or {}).get("self_assessment") == "yes":
+        jan = dt.date(today.year if today.month == 1 else today.year + 1, 1, 31)
+        out.append({"when": jan.isoformat(), "what": "Self Assessment: online return and any tax owed",
+                    "detail": f"For the {jan.year - 2}/{str(jan.year - 1)[-2:]} tax year.", "go": None})
     if b.get("applied"):
         try:
             nxt = dt.date.fromisoformat(b["applied"]).replace(year=dt.date.fromisoformat(b["applied"]).year + 1)
@@ -211,7 +233,7 @@ def summary() -> dict:
             if d is not None:
                 lines.append(f"Fixed rate ends in {d} days" if d >= 0 else f"Fixed rate ended {-d} days ago")
             if m.get("payoff_on"):
-                lines.append("Clear by " + dt.date.fromisoformat(m["payoff_on"][:7] + "-01").strftime("%B %Y"))
+                lines.append(_clear_by(dt.date.fromisoformat(m["payoff_on"][:7] + "-01")))
             if m.get("ltv") is not None:
                 lines.append(f"{m['ltv'] * 100:.0f}% loan to value")
             tiles.append({"key": "mortgage", "title": "Mortgage", "go": "mortgage", "level": lvl,

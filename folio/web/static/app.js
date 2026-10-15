@@ -871,9 +871,20 @@ async function loadHoldingMore(iid) {
     <div class="grid g2"><label class="field">Why I own it<textarea id="hm-why" placeholder="What the company does that others can\u2019t, and why that should last">${esc(th.why || '')}</textarea></label>
     <label class="field">What would change my mind<textarea id="hm-break" placeholder="For example: growth below 10% for two years, or losing its biggest customer">${esc(th.breakers || '')}</textarea></label></div>
     <div class="row wrap"><label class="field">Check again on<input type="date" id="hm-next" value="${esc(th.next_check || '')}"></label>
-      <label class="field">Where it stands<select id="hm-verdict"><option value="">Not judged yet</option>${[['intact', 'Reason intact'], ['watch', 'Watching'], ['impaired', 'Weakened'], ['broken', 'Broken: time to sell']].map(([k, l]) => `<option value="${k}" ${th.verdict === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div></div>` : ''}
+      <label class="field">Where it stands<select id="hm-verdict"><option value="">Not judged yet</option>${[['intact', 'Reason intact'], ['watch', 'Watching'], ['impaired', 'Weakened'], ['broken', 'Broken: time to sell']].map(([k, l]) => `<option value="${k}" ${th.verdict === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
+    ${factorLine(th)}</div>` : ''}
   <div class="row" style="margin-top:12px"><button class="btn primary" data-act="hm-save" data-iid="${iid}">Save these</button><span class="tiny muted">Saved separately from the settings above.</span></div>`;
   wire(box);
+}
+// Seeking Alpha's factor grades, typed in during a review if you use them: judged on the
+// business, beside the reason for owning it.
+const FACTOR_NAMES = [['valuation', 'Valuation'], ['growth', 'Growth'], ['profitability', 'Profitability'], ['momentum', 'Momentum'], ['revisions', 'EPS revisions']];
+const GRADE_LIST = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'F'];
+function factorLine(th) {
+  let f = {};
+  try { f = th.factors ? JSON.parse(th.factors) : {}; } catch { f = {}; }
+  return `<details style="margin-top:6px" ${Object.keys(f).length ? 'open' : ''}><summary class="small"><b>Factor grades</b> <span class="muted">${f.on ? `typed in ${fmtDate(f.on)}` : 'optional: from Seeking Alpha, if you use it'}</span></summary>
+    <div class="row wrap" style="margin-top:8px">${FACTOR_NAMES.map(([k, l]) => `<label class="field">${l}<select data-factor="${k}"><option value="">\u2014</option>${GRADE_LIST.map(g => `<option ${f[k] === g ? 'selected' : ''}>${g}</option>`).join('')}</select></label>`).join('')}</div></details>`;
 }
 ACTS['hm-save'] = async b => {
   const iid = b.dataset.iid;
@@ -883,8 +894,9 @@ ACTS['hm-save'] = async b => {
     $$('[data-theme]', $('#hi-more-body')).forEach(inp => { shares[inp.dataset.theme] = inp.value === '' ? null : inp.value; });
     await api(`/api/instrument/${iid}/themes`, { method: 'PUT', body: { shares } });
     if ($('#hm-why')) {
+      const factors = Object.fromEntries($$('[data-factor]', $('#hi-more-body')).map(x => [x.dataset.factor, x.value]));
       await api(`/api/theses/${iid}`, { method: 'PUT', body: { why: $('#hm-why').value, breakers: $('#hm-break').value,
-        next_check: $('#hm-next').value, verdict: $('#hm-verdict').value } });
+        next_check: $('#hm-next').value, verdict: $('#hm-verdict').value, factors } });
     }
     toast('Saved.');
     $('#hi-more').dataset.loaded = '';
@@ -1157,6 +1169,7 @@ async function vAI(el) {
     <div class="traces">${m.lights.filter(x => x.group === g).map(trace).join('') || '<div class="trace none"><div class="words">No lights for this one yet.</div></div>'}</div>
     ${d.narratives && d.narratives[g] ? `<p class="trace-note">${narr(d.narratives[g])}</p>` : ''}`).join('')}
     <p class="tiny" style="margin-top:14px;color:var(--mon-muted)">${w.legacy ? 'Watching the AI trade, the original watch. The plan review on the Overall tab can choose what you watch instead.' : `Watching ${themesWatched.map(g => esc(gTitle(g))).join(', ')}, chosen ${w.chosen_at ? fmtDate(w.chosen_at) : 'in the plan review'}.`} <a href="#" data-act="watch-change">Change what you watch</a></p>
+    ${(d.moved || []).length ? `<p class="tiny moved"><b>Outside your watch:</b> ${d.moved.map(x => `${esc(x.title)} (${x.reds.map(r => `${esc(r.title)} red${r.since ? ` since ${fmtDate(r.since)}` : ''}`).join('; ')})`).join(', ')}. Not counted in your dial; listed so that nothing big goes unseen.</p>` : ''}
   </section>
 
   ${playbookPanels(d.playbook, d.narratives && d.narratives.signals)}
@@ -1310,7 +1323,7 @@ const GROUPS = [['ai', 'The AI trade'], ['markets', 'Stock markets'], ['sectors'
                 ['commodities', 'Commodities'], ['rates', 'Rates and the pound'], ['stress', 'Stress gauges']];
 
 async function vMarkets(el) {
-  const d = await api('/api/markets');
+  const [d, val] = await Promise.all([api('/api/markets'), api('/api/valuations').catch(() => null)]);
   const keys = S.compare.filter(k => d.series.some(s => s.key === k));
   const cmp = keys.length ? await api(`/api/series?keys=${keys.map(k => 'REF:' + k).join(',')}&days=${S.period.compare}&rebase=1`) : { series: [] };
   const palette = ['var(--accent)', '#b35c00', '#7b3fc4', '#2f5bd3', '#c0392b', '#3d7d2c'];
@@ -1341,9 +1354,39 @@ async function vMarkets(el) {
         </div>`;
       }).join('')}</div></section>`;
     }).join('')}
+    ${val ? valuationsPanel(val) : ''}
     <p class="note">Prices come from Yahoo Finance\u2019s public charts and the Federal Reserve Bank of St. Louis (FRED). They can be delayed, and Yahoo\u2019s service is unofficial, so a figure here can occasionally be missing or late.</p>
   </div>`;
 }
+// Valuations with no free daily feed, typed in by hand with their dates (engine/valuations.py).
+function valuationsPanel(v) {
+  const fmtV = (f, x) => `${x.value}${f.unit === '%' ? '%' : '\u00d7'}`;
+  return `<section class="panel"><div class="spread"><div><h2>Valuations, typed in by hand</h2>
+      <p class="lede" style="margin:0">Measures of how dear shares are that have no free daily feed. Type them in now and then (once a month is plenty); each keeps its date. None of them times the market.</p></div>
+      <button class="btn small" data-act="val-edit">Update</button></div>
+    <div class="table-wrap" style="margin-top:10px"><table class="small"><tbody>
+      ${v.fields.map(f => { const x = v.values[f.key];
+        return `<tr><td><b>${esc(f.label)}</b><div class="tiny muted">${esc(f.about)}</div></td>
+          <td class="r" style="white-space:nowrap">${x ? `<b>${esc(fmtV(f, x))}</b><div class="tiny ${x.old ? 'warnline' : 'muted'}">${fmtDate(x.on)}${x.old ? ', old' : ''}</div>` : '<span class="muted">\u2014</span>'}</td></tr>`; }).join('')}
+    </tbody></table></div></section>`;
+}
+ACTS['val-edit'] = async () => {
+  let v;
+  try { v = await api('/api/valuations'); } catch (e) { toast(e.message, true); return; }
+  const today = new Date().toISOString().slice(0, 10);
+  openModal({ title: 'Valuations, typed in by hand', wide: true, body: `
+    <p class="small muted" style="max-width:80ch">Leave a box empty to clear it. The date is the day the figure is for.</p>
+    <div class="stack" style="margin-top:10px">${v.fields.map(f => { const x = v.values[f.key] || {};
+      return `<div class="form-grid val-row"><label class="field">${esc(f.label)}<input type="number" step="any" id="val-${f.key}" value="${esc(x.value ?? '')}" placeholder="${f.unit === '%' ? 'e.g. 4.3' : 'e.g. 22.5'}"><span class="help">Where: ${esc(f.where)}</span></label>
+        <label class="field">For the date<input type="date" id="val-on-${f.key}" value="${esc(x.on || today)}"></label>
+        <label class="field">Note (optional)<input type="text" id="val-note-${f.key}" value="${esc(x.note || '')}" maxlength="200"></label></div>`; }).join('')}</div>`,
+    foot: `<button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="val-save">Save</button>` });
+  S.valFields = v.fields.map(f => f.key);
+};
+ACTS['val-save'] = async b => {
+  const body = Object.fromEntries((S.valFields || []).map(k => [k, { value: $(`#val-${k}`).value, on: $(`#val-on-${k}`).value, note: $(`#val-note-${k}`).value }]));
+  await busy(b, async () => { await api('/api/valuations', { method: 'PUT', body }); closeModal(); toast('Saved.'); render(); });
+};
 ACTS['cmp-period'] = b => { S.period.compare = +b.dataset.v; render(); };
 ACTS['cmp-toggle'] = b => {
   const k = b.dataset.key;
@@ -1470,7 +1513,7 @@ async function vSettings(el) {
     ${extra('bottom')}
     <section class="panel"><h2>Help</h2>
       <p class="lede">Something wrong, or an idea? The Help button opens an email to ${esc(S.boot.settings.help_email || 'Allan')} with the app\u2019s version and the screen you were on. Nothing about your money goes in it.</p>
-      <button class="btn" data-act="help-email">Email for help</button>
+      <div class="row wrap"><button class="btn" data-act="help-email">Email for help</button><button class="btn ghost" data-act="glossary">Words explained</button></div>
     </section>
     <p class="note">Whiskers is a personal tool for keeping to your own plan. It is not financial advice. It only ever reads from your platforms and cannot place a trade.</p>
   </div>`;
