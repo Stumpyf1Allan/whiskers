@@ -57,7 +57,9 @@ Q = [
     {"id": "household", "part": "you", "kind": "one", "text": "Who shares your finances?",
      "options": _opts(("single", "Just me"), ("married", "Me and my husband, wife or civil partner"),
                       ("cohabit", "Me and a partner we're not married to")),
-     "why": "A husband, wife or civil partner inherits free of inheritance tax; an unmarried partner doesn't."},
+     "why": "A husband, wife or civil partner inherits free of inheritance tax; an unmarried partner doesn't. "
+            "The plan is for you alone: put in your own pensions and income, and your share of anything "
+            "joint (half a joint mortgage and home, say)."},
     {"id": "plan_to", "part": "you", "kind": "one", "text": "How long should the plan last?", "maps": "horizon_age",
      "options": _opts((90, "To 90"), (95, "To 95 (the usual choice)"), (100, "To 100")),
      "why": "Running out of money is the risk a plan most needs to avoid; long family lives argue for 100."},
