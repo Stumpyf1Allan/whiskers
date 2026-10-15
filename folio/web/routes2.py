@@ -424,7 +424,7 @@ def api_written_page(req, m, q, body):
             "h2{font-size:1.1rem;margin:22px 0 6px;border-bottom:1px solid #dfe4ea;padding-bottom:4px}"
             "ul{margin:6px 0 0;padding-left:20px}li{margin:3px 0}.m{color:#6f7c8b;font-size:.9rem}"
             "@media print{body{margin:0}}</style></head><body>"
-            f"<h1>{html.escape(w['title'])}</h1><p class=\"m\">Made {html.escape(w['made'])}</p>"
+            f"<h1>{html.escape(w['title'])}</h1><p class=\"m\">Made {html.escape(_day(w['made']))}</p>"
             + "".join(parts) + f"<p class=\"m\" style=\"margin-top:22px\">{html.escape(w['footer'])}</p></body></html>")
     return {"_file": page.encode("utf-8"), "_name": f"{config.APP_FILE_NAME} written plan {db.today()}.html",
             "_type": "text/html"}
