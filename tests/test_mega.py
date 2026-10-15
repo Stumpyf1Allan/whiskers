@@ -149,6 +149,35 @@ def test_a_final_salary_pension_taken_early_is_reduced():
     assert paying[0] == pytest.approx(7500, abs=1)               # five years early at 5% a year
 
 
+def test_a_pension_already_being_paid_brings_no_second_lump_sum():
+    _basic_plan(dob=_years_ago(64.5), stop_age=60)
+    pensions.add({"name": "NHS 1995", "kind": "db", "yearly": 16000, "normal_age": 60, "start_age": 60,
+                  "lump_sum": 48000, "early_reduction": 5})
+    rows = retirement.analyse(full=False)["plan"]["rows"]
+    assert all(r["lump"] == 0 for r in rows)                      # it was paid at 60
+    assert rows[0]["db"] == pytest.approx(16000)                  # what it pays now, as typed
+
+
+def test_a_pot_already_in_drawdown_has_had_its_tax_free_cash():
+    _basic_plan(dob=_years_ago(66), stop_age=60)
+    pensions.add({"name": "Old pot", "kind": "dc", "pot": 80000, "start_age": 61})
+    rows = retirement.analyse(full=False)["plan"]["rows"]
+    assert all(r["lump"] == 0 for r in rows)                      # had at 61
+    assert rows[0]["from_pension"] > 0 or rows[0]["from_cash"] >= 0
+
+
+def test_a_pension_pot_is_opened_before_the_plan_is_called_short():
+    # Still working at 63 when a big bill falls due: the pot pays (with its tax), rather
+    # than the plan running short with a pension untouched.
+    _basic_plan(dob=_years_ago(62.6), stop_age=66, salary=40000, spend_essential=1500, spend_extra=300,
+                one_offs=[{"label": "Interest-only mortgage ends", "age": 63, "amount": 60000}])
+    pensions.add({"name": "Workplace pot", "kind": "dc", "pot": 200000})
+    plan = retirement.analyse(full=False)["plan"]
+    year = next(r for r in plan["rows"] if int(r["age"]) == 63)
+    assert year["short"] == 0 and year["lump"] > 0                # tax-free cash, then drawdown
+    assert plan["runs_out_at"] is None or plan["runs_out_at"] > 64
+
+
 def test_the_state_pension_starts_part_way_through_its_first_year():
     _basic_plan(dob=_years_ago(60.5), stop_age=60.5)              # born in 1966: State Pension at 67
     retirement.save({"state_pension": {"weekly": 200}})

@@ -326,10 +326,10 @@ function pensionForm(kind, p) {
   let fields = f('pf-name', 'Name', v('name'), { type: 'text', ph: kind === 'db' ? 'NHS Pension' : kind === 'sa_ra' ? 'Allan Gray RA' : 'Aviva workplace pension' }) +
     f('pf-provider', 'Provider (optional)', v('provider'), { type: 'text' });
   if (kind === 'db') {
-    fields += f('pf-yearly', 'Pension a year built up so far (£)', v('yearly'), { step: 100, help: 'From the latest statement or the scheme’s online portal. In today’s money.' }) +
+    fields += f('pf-yearly', 'Pension a year built up so far (£)', v('yearly'), { step: 100, help: 'From the latest statement or the scheme’s online portal. In today’s money. Already being paid? What it pays now.' }) +
       f('pf-yearly-on', 'As at', String(v('yearly_as_of')).slice(0, 10), { type: 'date' }) +
       f('pf-normal', 'The scheme’s pension age', v('normal_age'), { step: 1, ph: '67', help: 'NHS 2015 scheme: your State Pension age. 1995 section: 60.' }) +
-      f('pf-start', 'When you’ll take it (age)', v('start_age'), { step: 0.5, ph: 'the scheme’s age' }) +
+      f('pf-start', 'When you’ll take it (age)', v('start_age'), { step: 0.5, ph: 'the scheme’s age', help: 'Already being paid? The age it started: its lump sum is then counted as paid.' }) +
       f('pf-early', 'Reduction for each year taken early (%)', v('early_reduction'), { step: 0.1, ph: '5', help: 'Often about 5% a year. The scheme’s own figures win.' }) +
       f('pf-lump', 'Automatic lump sum (£)', v('lump_sum'), { step: 100, ph: '0', help: 'Some older schemes (the NHS 1995 section) pay one as well as the pension.' }) +
       f('pf-commute', 'Pension swapped for cash (%)', v('commute_pct'), { step: 1, ph: '0' }) +
@@ -349,7 +349,7 @@ function pensionForm(kind, p) {
     fields += f('pf-pot', `Value of the pot (${ccy})`, v('pot'), { step: 100 }) +
       f('pf-pot-on', 'As at', String(v('pot_as_of')).slice(0, 10), { type: 'date' }) +
       f('pf-contrib', `Going in each month, you and any employer (${ccy})`, v('contrib_monthly'), { step: 10, ph: '0' }) +
-      f('pf-start', 'Start taking it at (age)', v('start_age'), { step: 0.5, ph: 'when you stop work', help: kind === 'sa_ra' ? 'In South Africa, from 55.' : 'From 55, or 57 from April 2028.' }) +
+      f('pf-start', 'Start taking it at (age)', v('start_age'), { step: 0.5, ph: 'when you stop work', help: kind === 'sa_ra' ? 'In South Africa, from 55.' : 'From 55, or 57 from April 2028. Already taking money from it? The age you started: its tax-free cash is then counted as had.' }) +
       (kind === 'dc' ? sel('pf-take', 'How you’ll take it', d.take, v('take', 'drawdown')) : '') +
       f('pf-growth', 'Growth above inflation (% a year)', v('growth'), { step: 0.1, ph: 'the plan’s default', help: 'Blank uses the plan’s figure for a typical balanced fund.' }) +
       f('pf-charges', 'Charges (% a year)', v('charges'), { step: 0.05, ph: '0.5' });

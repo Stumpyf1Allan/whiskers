@@ -422,14 +422,24 @@ def project(s: dict, data: dict, opts: dict | None = None) -> dict:
     for d in dcs:
         d["open"] = False
         d["income"] = 0.0
+        # Already being drawn from when the plan starts: open, with its tax-free cash
+        # already had (the statement's value is what's left).
+        if d["kind"] == "dc" and d["take"] == "drawdown" and d["start_age"] is not None \
+                and d["start_age"] < age0 - 1 / 12:
+            d["open"] = True
     dbs = [dict(d) for d in data["dbs"]]
+    lsa_left = float(R.PENSIONS["lump_sum_allowance"])
     for d in dbs:
         d["paying"] = 0.0
         d["started"] = False
+        # Already being paid when the plan starts: its lump sum was paid then, and the
+        # yearly figure is what it pays now, early reduction and all.
+        d["in_payment"] = d["start_age"] < age0 - 1 / 12
+        if d["in_payment"]:
+            lsa_left -= min(lsa_left, d["lump_sum"])
     annuities = [dict(x) for x in data["annuities"]]
     for x in annuities:
         x["now"] = x["yearly"]
-    lsa_left = float(R.PENSIONS["lump_sum_allowance"])
     salary = float(s.get("salary") or 0.0)
     saving_monthly = float(s.get("saving_monthly") or 0.0)
     essential = float(s.get("spend_essential") or 0.0) * 12
@@ -493,7 +503,10 @@ def project(s: dict, data: dict, opts: dict | None = None) -> dict:
         lump = 0.0
         db_income = 0.0
         for d in dbs:
-            if age >= d["start_age"] and not d["started"]:
+            if age >= d["start_age"] and not d["started"] and d["in_payment"]:
+                d["paying"] = d["yearly"]
+                d["started"] = True
+            elif age >= d["start_age"] and not d["started"]:
                 early = max(0.0, d["normal_age"] - d["start_age"])
                 full = d["yearly"] * max(0.0, 1 - early * d["early_reduction"] / 100)
                 given_up = full * d["commute_pct"] / 100
@@ -667,6 +680,26 @@ def project(s: dict, data: dict, opts: dict | None = None) -> dict:
                 if need <= 0.005:
                     break
                 need = from_pensions(need) if pot == "pension" else take_from(need, pot)
+            if need > 0.5 and age >= access_age:
+                # Still short while a pension pot sits unopened (usually because work hasn't
+                # stopped yet): open it, as anyone over the minimum pension age can, rather
+                # than call the plan short with a pension untouched. The tax shows the cost.
+                opened = 0.0
+                for d in dcs:
+                    if not d["open"] and d["kind"] != "sa_ra" and d["take"] == "drawdown" and d["value"] > 0.005:
+                        d["open"] = True
+                        if s.get("tax_free_cash") != "ufpls":
+                            tfc = min(d["value"] * R.PENSIONS["tax_free_share"], lsa_left)
+                            lsa_left -= tfc
+                            d["value"] -= tfc
+                            opened += tfc
+                if opened:
+                    lump += opened
+                    tfc_total += opened
+                    cash += opened
+                    need = take_from(need, "cash")
+                if need > 0.005:
+                    need = from_pensions(need)
             if need > 0.5:
                 shortfall_ages.append(age)
             gap_left = need
