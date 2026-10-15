@@ -858,12 +858,8 @@ def written_plan() -> dict:
 
     dob = retirement.dob_of(s)
     spa = statepension.describe_age(dob) if dob else None
-    name = None
-    try:
-        from .. import config
-        name = config.settings.get("user_name") or None
-    except Exception:
-        pass
+    from .. import config
+    name = config.settings.get("user_name") or None
     sec("About me", [
         f"Born {dob.strftime('%d %B %Y').lstrip('0')}." if dob else None,
         f"Living in {retirement.NATIONS.get(s.get('nation'), 'England')}." if s.get("nation") else None,
@@ -969,8 +965,9 @@ def review_pack() -> str:
         lines += ["", "## Warning lights", "", f"Reading: {m['label']}.", ""]
         for x in m["lights"]:
             lines.append(f"- {x['title']}: {x['level']} ({x['words']})")
-    except Exception:
-        pass
+    except Exception as e:
+        # Offline, or before the first refresh: the pack still goes, and says what's missing.
+        lines += ["", "## Warning lights", "", f"Not available when this was made ({e}).", ""]
     lines += ["", "## Answers", "", "```json", json.dumps(d["answers"], indent=1, default=str), "```", "",
               "Not financial advice."]
     return "\n".join(lines)

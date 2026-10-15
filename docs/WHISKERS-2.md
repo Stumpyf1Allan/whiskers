@@ -22,7 +22,13 @@ right; Help (bottom of the sidebar) opens an email to Allan with the version and
 screen, and nothing about money.
 
 On a phone the tabs move to the bottom of the screen and each tab's screens run along the
-top.
+top. An Android phone runs the Whiskers app, which follows the PC. For any other phone (an
+iPhone, say), Settings › **A copy for your phone** makes one page of the figures: net
+worth, how each part is doing, the retirement headline, the dates coming up, holdings,
+savings, the mortgage, pensions and the big picture. Save it somewhere private the phone
+can open (your own iCloud Drive, OneDrive or Google Drive) and tap it. It needs no
+internet and nothing in it calls out. It is a snapshot and says so at the top, so make a
+new one now and then; it keeps the same name, so the new copy replaces the old.
 
 ## The plan review (Overall › Plan review)
 
@@ -160,7 +166,7 @@ click.
 
 - New engine modules: `engine/retirement.py`, `pensions.py`, `statepension.py`, `uktax.py`,
   `ukrules.py` (every dated figure, with its source), `mortgage.py` (from Mittens &
-  Pence), `overall.py`, `builder.py`, `xray.py`, `classify.py`, `themes.py`; the Budget in
+  Pence), `overall.py`, `builder.py`, `xray.py`, `classify.py`, `themes.py`, `phonecopy.py`; the Budget in
   `folio/budget/`; files in `folio/importers/`, `folio/inbox.py`, `folio/reminders.py`; the
   catalogue in `folio/institutions/`.
 - Routes for all of it are in `web/routes2.py`; the screens are split across

@@ -12,8 +12,8 @@ import datetime as dt
 import json
 
 from .. import config, db, inbox, reminders
-from ..engine import (builder, classify, mortgage as mort, overall, pensions as pens, portfolio, retirement,
-                      statepension, stress, themes, ukrules, xray)
+from ..engine import (builder, classify, mortgage as mort, overall, pensions as pens, phonecopy, portfolio,
+                      retirement, statepension, stress, themes, ukrules, xray)
 from ..importers import investments as inv
 from ..institutions import registry
 from .server import ApiError, _float, _int, route
@@ -24,6 +24,12 @@ from .server import ApiError, _float, _int, route
 @route("GET", "/api/overall")
 def api_overall(req, m, q, body):
     return overall.summary()
+
+
+@route("GET", "/api/export/phone")
+def api_export_phone(req, m, q, body):
+    """One HTML file of the figures, for a phone without the app (an iPhone, say)."""
+    return {"_file": phonecopy.build(), "_name": phonecopy.filename(), "_type": "text/html; charset=utf-8"}
 
 
 # ============================================================================ assets

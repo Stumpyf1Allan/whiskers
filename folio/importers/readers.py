@@ -12,7 +12,7 @@ import datetime as dt
 import io
 import pathlib
 import re
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405  # only on text with no DOCTYPE or ENTITY: see read_ofx
 
 ENCODINGS = ["utf-8-sig", "utf-8", "cp1252", "latin-1", "utf-16"]
 
@@ -168,8 +168,12 @@ def read_ofx(raw: bytes, name: str = "") -> Table:
     body = re.sub(r"&(?!(amp|lt|gt|quot|apos);)", "&amp;", body)
     header = ["date", "description", "memo", "amount", "type", "id", "currency"]
     rows = []
+    # A bank's statement never needs a DOCTYPE or an entity; a crafted file could use them to
+    # make the parser expand text without end. Refused before anything is parsed.
+    if re.search(r"<!\s*(DOCTYPE|ENTITY)", body, re.I):
+        return Table(header, rows, name)
     try:
-        root = ET.fromstring(body)
+        root = ET.fromstring(body)  # nosec B314  # DOCTYPE and ENTITY refused just above
     except ET.ParseError:
         return Table(header, rows, name)
 

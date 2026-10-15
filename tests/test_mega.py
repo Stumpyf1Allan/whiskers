@@ -413,6 +413,30 @@ def test_every_new_screen_answers_with_the_sample_household(server):
     assert status == 200 and b"<h1>" in body and "text/html" in ctype
 
 
+def test_a_copy_for_a_phone_is_one_page_with_nothing_that_calls_out(server):
+    sample.load()
+    add_position(add_platform(name="<b>Odd & name</b>", cash=10.0), "ABC", name="<i>A fund</i>",
+                 broker_value=1234.0, valued_at=db.now())
+    from folio.engine import phonecopy
+    page = phonecopy.build().decode("utf-8")
+    assert page.startswith("<!doctype html>") and "A snapshot from" in page
+    for part in ("Net worth", "How each part is doing", "Retirement", "Your investments", "Mortgage", "Pensions",
+                 "Cash and savings", "Coming up"):
+        assert f"<h2>{part}</h2>" in page, part
+    assert "[[" not in page and "<script" not in page.lower() and "src=" not in page
+    assert "http://" not in page and "https://" not in page
+    assert "&lt;i&gt;A fund&lt;/i&gt;" in page and "<i>A fund</i>" not in page
+    assert "R48,000" in page                     # rand shown as rand, with pounds beside it
+    status, body, ctype = _get(server, "/api/export/phone")
+    assert status == 200 and "text/html" in ctype and body.startswith(b"<!doctype html>")
+
+
+def test_a_copy_for_a_phone_works_on_an_empty_copy():
+    from folio.engine import phonecopy
+    page = phonecopy.build().decode("utf-8")
+    assert "Net worth" in page and "needs" in page          # the plan says what it still needs
+
+
 def test_the_budget_answers_only_when_it_is_switched_on(server):
     assert _get(server, "/api/budget")[0] == 400
     config.settings.update({"budget_on": True})

@@ -1463,9 +1463,9 @@ async function vSettings(el) {
         <dt>Updates</dt><dd>${up ? updateWords(up) : 'Unknown'}</dd>
         <dt>Your data</dt><dd class="small">${esc(d.data_dir)}</dd>
         <dt>Keys stored</dt><dd class="small">${onAndroid() ? 'Encrypted, in storage only the Whiskers app can read' : d.vault === 'os-keychain' ? 'Encrypted, with the key in your computer\u2019s own credential store' : 'Encrypted in the data folder (no credential store was found on this computer)'}</dd></dl>
-      <div class="row wrap" style="margin-top:10px">${up && up.status !== 'off' ? '<button class="btn" data-act="upd-check">Check for an update</button>' : ''}<button class="btn" data-act="export-xlsx">Export to a spreadsheet</button>${onAndroid() ? '' : '<button class="btn" data-act="open-data">Open the data folder</button>'}<button class="btn" data-act="tour">Take the tour</button>
+      <div class="row wrap" style="margin-top:10px">${up && up.status !== 'off' ? '<button class="btn" data-act="upd-check">Check for an update</button>' : ''}<button class="btn" data-act="export-xlsx">Export to a spreadsheet</button>${onAndroid() ? '' : '<button class="btn" data-act="export-phone">A copy for your phone</button><button class="btn" data-act="open-data">Open the data folder</button>'}<button class="btn" data-act="tour">Take the tour</button>
         <label class="row small"><input type="checkbox" data-act="toggle-refresh" ${s.refresh_on_open ? 'checked' : ''}>Refresh when Whiskers opens</label></div>
-      <p class="note" style="margin-top:6px">Export to a spreadsheet makes an Excel file of everything: your net worth, holdings, dividends, trades, cash movements and how you\u2019re allocated against your plan, and the mortgage, pensions and year-by-year retirement plan when there are any.</p>
+      <p class="note" style="margin-top:6px">Export to a spreadsheet makes an Excel file of everything: your net worth, holdings, dividends, trades, cash movements and how you\u2019re allocated against your plan, and the mortgage, pensions and year-by-year retirement plan when there are any.${onAndroid() ? '' : ' <b>A copy for your phone</b> makes one page of your figures to read on a phone without the Whiskers app, such as an iPhone: save it somewhere private the phone can open (your own iCloud Drive, OneDrive or Google Drive) and tap it. It is a snapshot, so make a new one now and then.'}</p>
     </section>
     ${extra('bottom')}
     <section class="panel"><h2>Help</h2>
@@ -1676,6 +1676,13 @@ ACTS['export-xlsx'] = async b => {
     const res = await api('/api/export/xlsx');
     const said = await saveBlob(await res.blob(), `${S.boot.app.name} export ${new Date().toISOString().slice(0, 10)}.xlsx`);
     toast(said || 'Downloaded.');
+  });
+};
+ACTS['export-phone'] = async b => {
+  await busy(b, async () => {
+    const res = await api('/api/export/phone');
+    const said = await saveBlob(await res.blob(), `${S.boot.app.name} - your money at a glance.html`);
+    toast(said || 'Downloaded. Put it somewhere private your phone can open, such as your own iCloud Drive, and tap it there.');
   });
 };
 ACTS['limits-save'] = async b => {
