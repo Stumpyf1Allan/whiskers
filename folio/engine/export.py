@@ -1,4 +1,4 @@
-"""Your whole portfolio as a spreadsheet: one workbook, six sheets, built from the exact
+"""Everything as a spreadsheet: one workbook, built from the exact
 same figures the app's own screens show — this calls the same engine functions Overview,
 Holdings and Allocation do, rather than querying the database afresh, so the numbers in
 the file can never drift from what's on screen.
@@ -227,6 +227,92 @@ def _cash(wb: Workbook) -> None:
     _autoheight(ws)
 
 
+# ---------------------------------------------------------------------------- 2.0: the rest of the picture
+
+def _networth(wb: Workbook) -> None:
+    from . import overall
+    bs = overall.balance_sheet()
+    ws = _sheet(wb, "Net worth", ["", "Amount (\u00a3)"], [34, 16])
+    for k, v in bs["own"].items():
+        _row(ws, [f"Own: {k}", v], {2: MONEY})
+    for k, v in bs["owe"].items():
+        _row(ws, [f"Owe: {'Credit cards' if k == 'Cards' else k}", -v], {2: MONEY})
+    _row(ws, ["Net worth", bs["net"]], {2: MONEY})
+    ws.cell(row=ws.max_row, column=1).font = Font(name="Arial", bold=True)
+    for p in bs["promised"]:
+        _row(ws, [f"Pension promised a year: {p['name']}", p["yearly"]], {2: MONEY})
+    if bs["unconverted"]:
+        _row(ws, [f"Left out, no exchange rate yet: {', '.join(bs['unconverted'])}", None])
+    hist = overall.history()
+    if hist:
+        ws.append([])
+        _row(ws, ["Day", "Net worth (\u00a3)"])
+        for d, v in hist:
+            _row(ws, [_date(d), v], {1: DATEFMT, 2: MONEY})
+    _autoheight(ws)
+
+
+def _mortgages(wb: Workbook) -> None:
+    from . import mortgage as mort
+    items = mort.all_mortgages()
+    if not items:
+        return
+    ws = _sheet(wb, "Mortgage", ["Mortgage", "Month", "Payment (\u00a3)", "Interest (\u00a3)", "Off the balance (\u00a3)",
+                                 "Still owed (\u00a3)"], [24, 12, 14, 14, 18, 16])
+    for m in items:
+        sm = mort.summarise(m)
+        if sm["balance"] is None or not sm["monthly_payment"]:
+            _row(ws, [m["name"], None, None, None, None, sm["balance"]], {6: MONEY})
+            continue
+        months = min(sm["months_left"] or 0, 480)
+        for r in mort.amortise(sm["balance"], m["rate"], sm["monthly_payment"], months, dt.date.today().replace(day=1),
+                               interest_only=m["repayment_type"] == "interest_only"):
+            _row(ws, [m["name"], _date(r["on"]), r["payment"], r["interest"], r["capital"], r["balance"]],
+                 {2: "mmm yyyy", 3: MONEY, 4: MONEY, 5: MONEY, 6: MONEY})
+    _autoheight(ws)
+
+
+def _pensions(wb: Workbook) -> None:
+    from . import pensions as pens
+    rows = pens.all_rows()
+    if not rows:
+        return
+    ws = _sheet(wb, "Pensions", ["Pension", "Kind", "Provider", "Pot", "A year", "Currency", "From age",
+                                 "Nominated", "Statement"], [28, 30, 22, 14, 14, 10, 10, 18, 13])
+    for r in rows:
+        _row(ws, [r["name"], pens.KINDS.get(r["kind"], r["kind"]), r["provider"], r["pot"], r["yearly"],
+                  r["currency"] or "GBP", r["start_age"] or r["normal_age"], r["nominee"],
+                  _date(r["pot_as_of"] or r["yearly_as_of"])], {4: "#,##0", 5: "#,##0", 9: DATEFMT})
+    _autoheight(ws)
+
+
+def _retirement(wb: Workbook) -> None:
+    from . import retirement
+    try:
+        out = retirement.analyse(full=False)
+    except Exception as e:  # nosec B110  # a plan that can't run leaves its sheet out, with the reason in the log
+        db.log("export.retirement", str(e))
+        return
+    if not out.get("ready"):
+        return
+    cols = [("Age", "age", None), ("Year", "year", None), ("Pay after NI", "salary", MONEY),
+            ("State Pension", "state", MONEY), ("Final-salary pensions", "db", MONEY), ("Annuities", "annuity", MONEY),
+            ("Other income", "other", MONEY), ("Tax-free cash", "lump", MONEY), ("Income tax", "tax", MONEY),
+            ("Spending", "spend", MONEY), ("Mortgage", "mortgage", MONEY), ("One-offs", "one_off", MONEY),
+            ("Saved", "saving", MONEY), ("From cash", "from_cash", MONEY), ("From ISAs", "from_isa", MONEY),
+            ("From general accounts", "from_gia", MONEY), ("From abroad", "from_abroad", MONEY),
+            ("From pension pots", "from_pension", MONEY), ("Short by", "short", MONEY), ("Cash", "cash", MONEY),
+            ("ISAs", "isa", MONEY), ("General accounts", "gia", MONEY), ("Abroad", "abroad", MONEY),
+            ("Pension pots", "pensions", MONEY), ("Altogether", "liquid", MONEY), ("Mortgage left", "mortgage_left", MONEY)]
+    ws = _sheet(wb, "Retirement plan", [c[0] for c in cols], [8, 8] + [14] * (len(cols) - 2))
+    for r in out["plan"]["rows"]:
+        _row(ws, [int(r["age"]) if k == "age" else r[k] for _, k, _f in cols],
+             {i + 1: f for i, (_, _k, f) in enumerate(cols) if f})
+    ws.append([])
+    _row(ws, ["In today's money. Assumptions, not a forecast: see the Retirement tab for what it rests on."])
+    _autoheight(ws)
+
+
 # ---------------------------------------------------------------------------- entry point
 
 def build() -> bytes:
@@ -238,11 +324,15 @@ def build() -> bytes:
     wb = Workbook()
     wb.remove(wb.active)
     _summary(wb, pos, tot, when)
+    _networth(wb)
     _holdings(wb, pos)
     _allocation(wb, pos, tot)
     _dividends(wb)
     _trades(wb)
     _cash(wb)
+    _mortgages(wb)
+    _pensions(wb)
+    _retirement(wb)
     wb.active = 0
     # Values only. openpyxl turns any text starting with "=" into a live formula, and
     # names, notes and plan files are typed by people, so nothing may calculate, link

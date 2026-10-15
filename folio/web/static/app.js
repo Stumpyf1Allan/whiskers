@@ -1465,7 +1465,7 @@ async function vSettings(el) {
         <dt>Keys stored</dt><dd class="small">${onAndroid() ? 'Encrypted, in storage only the Whiskers app can read' : d.vault === 'os-keychain' ? 'Encrypted, with the key in your computer\u2019s own credential store' : 'Encrypted in the data folder (no credential store was found on this computer)'}</dd></dl>
       <div class="row wrap" style="margin-top:10px">${up && up.status !== 'off' ? '<button class="btn" data-act="upd-check">Check for an update</button>' : ''}<button class="btn" data-act="export-xlsx">Export to a spreadsheet</button>${onAndroid() ? '' : '<button class="btn" data-act="open-data">Open the data folder</button>'}<button class="btn" data-act="tour">Take the tour</button>
         <label class="row small"><input type="checkbox" data-act="toggle-refresh" ${s.refresh_on_open ? 'checked' : ''}>Refresh when Whiskers opens</label></div>
-      <p class="note" style="margin-top:6px">Export to a spreadsheet makes an Excel file of everything: your holdings, dividends, trades, cash movements and how you\u2019re allocated against your plan.</p>
+      <p class="note" style="margin-top:6px">Export to a spreadsheet makes an Excel file of everything: your net worth, holdings, dividends, trades, cash movements and how you\u2019re allocated against your plan, and the mortgage, pensions and year-by-year retirement plan when there are any.</p>
     </section>
     ${extra('bottom')}
     <section class="panel"><h2>Help</h2>

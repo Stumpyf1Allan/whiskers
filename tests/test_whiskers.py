@@ -682,7 +682,8 @@ def test_the_spec_points_at_real_files_and_never_excludes_an_aliased_module():
 
 
 def test_windows_scripts_have_windows_line_endings():
-    for f in (ROOT / "build" / "build_windows.bat", ROOT / "Start Whiskers.bat"):
+    for f in (ROOT / "build" / "build_windows.bat", ROOT / "Start Whiskers.bat",
+              ROOT / "Try Whiskers 2.0 (test copy).bat"):
         raw = f.read_bytes()
         assert raw.count(b"\n") == raw.count(b"\r\n"), f.name
     rules = (ROOT / ".gitattributes").read_text(encoding="utf-8")
@@ -1408,7 +1409,8 @@ def test_the_export_has_every_sheet_with_real_figures_in_them():
     import io
     from openpyxl import load_workbook
     wb = load_workbook(io.BytesIO(export.build()))
-    assert wb.sheetnames == ["Summary", "Holdings", "Allocation", "Dividends", "Trades", "Cash movements"]
+    # 2.0 adds Net worth always; Mortgage, Pensions and the Retirement plan only when there is one
+    assert wb.sheetnames == ["Summary", "Net worth", "Holdings", "Allocation", "Dividends", "Trades", "Cash movements"]
 
     hold = {c.value: i for i, c in enumerate(next(wb["Holdings"].iter_rows(min_row=1, max_row=1)), 1)}
     row = next(wb["Holdings"].iter_rows(min_row=2, max_row=2))

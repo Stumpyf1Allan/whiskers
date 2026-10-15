@@ -424,3 +424,11 @@ def test_the_new_routes_never_use_error_for_anything_but_failure():
     from .test_whiskers import ROOT
     src = (ROOT / "folio" / "web" / "routes2.py").read_text(encoding="utf-8")
     assert '"error":' not in src
+
+
+def test_a_built_app_carries_the_institution_catalogue_and_the_test_copy_keeps_apart():
+    from .test_whiskers import ROOT
+    spec = (ROOT / "build" / "whiskers.spec").read_text(encoding="utf-8")
+    assert '"institutions/data"' in spec and "folio.web.routes2" in spec
+    bat = (ROOT / "Try Whiskers 2.0 (test copy).bat").read_text(encoding="utf-8")
+    assert 'WHISKERS_DATA_DIR=%LOCALAPPDATA%\\Whiskers 2.0 test' in bat

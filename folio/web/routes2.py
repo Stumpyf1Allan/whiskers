@@ -321,7 +321,7 @@ def _theme_scenarios() -> list[dict]:
         val = e.get("ai_value") if t == "ai" else e.get("value")
         rp = stress.replay(t, val or 0.0, tot.get("invested") or 0.0, themes.LIBRARY[t].get("scenario_ref"))
         if rp and rp["loss"] > 0:
-            out.append({"key": t, "label": f"A repeat of {themes.in_sentence(t)}'s worst fall of the last five years",
+            out.append({"key": t, "label": f"The worst fall of the last five years in {themes.in_sentence(t)}, again",
                         "loss": rp["loss"],
                         "why": f"It fell {rp['depth'] * 100:.0f}% from {_day(rp['peak'])} to {_day(rp['trough'])}."})
     return out

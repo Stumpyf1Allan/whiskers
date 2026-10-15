@@ -22,9 +22,13 @@ CALM = {
 
 
 def _day(d: str | None) -> str:
+    """"11 Oct" for a date in the last year; with the year for anything older, so a high
+    from three years ago is never read as last week's."""
     if not d:
         return "recently"
     x = dt.date.fromisoformat(d[:10])
+    if (dt.date.today() - x).days > 300:
+        return f"{x.day} {x.strftime('%b')} {x.year}"
     return f"{x.day} {x.strftime('%b')}"
 
 

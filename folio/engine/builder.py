@@ -435,7 +435,10 @@ def risk_profile(a: dict, s: dict, ret: dict | None) -> dict:
     elif need_share is not None and need_share > growth + 5:
         short = (f"Your goals need about {need_share:.0f}% in shares on these assumptions, more than the "
                  f"{growth:.0f}% the plan will take. Rather than raise the risk, look at the levers below.")
+    need_status = ("unknown" if not (ret and ret.get("ready")) else
+                   "beyond" if need.get("real") is None else "known")
     return {"willing": round(willing), "able": round(able), "need": need_share, "need_real": need.get("real"),
+            "need_status": need_status,
             "need_words": need.get("words"), "growth": growth, "drawing": drawing,
             "years_to_stop": years, "why": why, "alternative": alternative, "shortfall": short,
             "willingness": round(w, 2)}
@@ -697,8 +700,8 @@ def draft() -> dict:
             rp = stress.replay(t, (e or {}).get("value") or 0.0, (tot.get("invested") or 0.0),
                                themes.LIBRARY[t].get("scenario_ref"))
             if rp and rp["loss"] > 0:
-                scen.append({"key": t, "label": f"A repeat of {themes.in_sentence(t)}'s worst "
-                             f"fall of the last five years", "loss": rp["loss"],
+                scen.append({"key": t, "label": f"The worst fall of the last five years in {themes.in_sentence(t)}, again",
+                             "loss": rp["loss"],
                              "why": f"{themes.LIBRARY[t]['title']} fell {rp['depth'] * 100:.0f}% from "
                                     f"{_day(rp['peak'])} to {_day(rp['trough'])}; world shares moved "
                                     + (f"{rp['world_move'] * 100:+.0f}%" if rp['world_move'] is not None else "an unknown amount")
@@ -740,13 +743,17 @@ def apply(choice: dict) -> dict:
     plan = d["plan"]
     done = []
     from . import plan as planfile
+    sorted_into: list[dict] = []
     if choice.get("sleeves", True):
         rep = planfile.import_plan({k: plan[k] for k in ("whiskers_plan", "about", "replace_sleeves", "sleeves")}
                                    | {"whiskers_plan": 1})
-        done.append(f"{rep['sleeves']} sleeves")
+        done.append(_n(rep["sleeves"], "sleeve"))
+        sorted_into = sort_into_sleeves()
+        if sorted_into:
+            done.append(f"{_n(len(sorted_into), 'holding')} sorted into them")
     if choice.get("rules", True) and plan["rules"]:
         rep = planfile.import_plan({"whiskers_plan": 2, "rules": plan["rules"]})
-        done.append(f"{rep['rules']} rules")
+        done.append(_n(rep["rules"], "rule"))
         # A company rule counts the holdings that say which company they are; make sure the
         # ones the X-Ray recognised do.
         for r in plan["rules"]:
@@ -785,10 +792,54 @@ def apply(choice: dict) -> dict:
     st["applied"] = db.today()
     st["applied_plan"] = plan
     db.set_meta("builder", st)
-    return {"ok": True, "done": done}
+    return {"ok": True, "done": done, "sorted": sorted_into}
+
+
+def _n(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+#: Where each kind of investment goes when its name doesn't say, by words in a sleeve's name.
+CLASS_SLEEVE = {"bond": ("gilt", "bond"), "linker": ("index-linked", "gilt", "bond"), "cash": ("cash",),
+                "gold": ("commod", "gold"), "commodity": ("commod",), "property": ("propert", "infrastruct", "real"),
+                "crypto": ("crypto",)}
+
+
+def sort_into_sleeves() -> list[dict]:
+    """Holdings in no sleeve go to the one their name or kind points to: a world fund to the
+    global core, a gilt fund to gilts. Only where the answer is clear; anything else is left
+    for the Allocation screen, which lists it with a suggestion."""
+    sleeves = db.rows("SELECT * FROM sleeves ORDER BY sort, id")
+    if not sleeves:
+        return []
+    out = []
+    seen = set()
+    for x in portfolio.positions():
+        if x["sleeve_id"] or x["instrument_id"] in seen:
+            continue
+        seen.add(x["instrument_id"])
+        cls, _ = classify.asset_class(x)
+        sid = None
+        words = CLASS_SLEEVE.get(cls)
+        if words:
+            sid = next((s_["id"] for w in words for s_ in sleeves if w in s_["name"].lower()), None)
+        if sid is None and cls == "cash":
+            sid = next((s_["id"] for s_ in sleeves if s_["is_cash"]), None)
+        if sid is None:
+            sid = allocation.suggest(x["name"], sleeves)
+        if sid is None and cls == "equity" and xray._index_kind(x):
+            sid = next((s_["id"] for s_ in sleeves if "core" in s_["name"].lower() or "global" in s_["name"].lower()), None)
+        if sid is None:
+            continue
+        db.execute("UPDATE instruments SET sleeve_id=? WHERE id=? AND sleeve_id IS NULL", (sid, x["instrument_id"]))
+        out.append({"holding": x["name"], "sleeve": next(s_["name"] for s_ in sleeves if s_["id"] == sid)})
+    return out
 
 
 # ---------------------------------------------------------------------------- the written plan
+
+OP_WORDS = {">": "above", ">=": "at or above", "<": "below", "<=": "at or below"}
+
 
 def written_plan() -> dict:
     """The investment policy statement, Bogleheads-style: everything decided, in one place,
@@ -817,7 +868,7 @@ def written_plan() -> dict:
         f"Born {dob.strftime('%d %B %Y').lstrip('0')}." if dob else None,
         f"Living in {retirement.NATIONS.get(s.get('nation'), 'England')}." if s.get("nation") else None,
         f"Planning to stop work at {s['stop_age']:g}." if s.get("stop_age") else None,
-        f"State Pension from {spa['words']} ({spa['date']})." if spa else None,
+        f"State Pension from {spa['words']} ({_day(spa['date'])})." if spa else None,
         f"The plan runs to age {s.get('horizon_age') or 95:g}.",
     ])
     sec("My goals", [
@@ -835,6 +886,14 @@ def written_plan() -> dict:
             f"against essentials of £{p['income_floor']['essential']:,.0f}." if p.get("income_floor") else None,
             f"Mortgage-free at about {int(p['mortgage_free_age'])}." if p.get("mortgage_free_age") else None,
         ])
+    sp = (ret or {}).get("state_pension") or {}
+    income = [f"State Pension: £{sp['weekly']:,.2f} a week (£{sp['yearly']:,.0f} a year) from {spa['words']}, "
+              f"{sp.get('basis', '')}." if sp.get("weekly") is not None and spa else None]
+    from . import pensions as pens
+    for r in pens.all_rows():
+        income.append(f"{r['name']}: {pens.describe(r)}" + (f"; nominated: {r['nominee']}" if r.get("nominee") else "; no nomination recorded") + ".")
+    if [x for x in income if x]:
+        sec("Income for life", income)
     sec("Risk", [
         f"Willing to hold about {risk['willing']}% in shares; able to hold about {risk['able']}%.",
         f"My goals need about {risk['need']:.0f}% in shares." if risk.get("need") is not None else None,
@@ -854,13 +913,15 @@ def written_plan() -> dict:
         or ["None set."])
     sec("What I watch", [
         f"Main watch: {themes.title(w['main'])}." if w.get("main") else "Markets in general.",
-        f"Also: {', '.join(themes.title(t) for t in w['themes'] if t != w['main'])}." if len(w["themes"]) > 1 else None,
-        *[f"{r['title']} {r['op']} {r['threshold']:g}{r['unit'] if r['unit'] != 'of 4' else ' of 4'}"
-          + (f": {r['action']}" if r.get("action") else "") for r in pb["signals"]],
+        f"Also: {', '.join(themes.in_sentence(t) for t in w['themes'] if t != w['main'])}." if len(w["themes"]) > 1 else None,
+        *[f"{r['title']}: a signal {OP_WORDS.get(r['op'], r['op'])} {r['threshold']:g}"
+          f"{r['unit'] if r['unit'] != 'of 4' else ' of 4'}" + (f". {r['action']}" if r.get("action") else "")
+          for r in pb["signals"]],
     ])
     plans = {r["topic"]: r["body"] for r in db.rows("SELECT topic, body FROM plans")}
     sec("In a fall", [plans.get("crash"), plans.get("ai")])
-    sec("To do", [f"{t['title']}" + (f" (by {t['when']})" if t.get("when") else "") for t in d["todos"]])
+    sec("To do", [f"{t['title']}" + (f" (by {_day(t['when']) if len(str(t['when'])) == 10 and str(t['when'])[4] == '-' else t['when']})"
+                                     if t.get("when") else "") for t in d["todos"]])
     sec("Reviews", ["Once a year, and after any big change in life."])
     return {"title": f"{name}'s written plan" if name else "My written plan", "made": db.today(),
             "sections": sections,

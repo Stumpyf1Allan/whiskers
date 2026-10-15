@@ -221,13 +221,16 @@ def summary() -> dict:
                           "lines": ["No mortgage added"]})
     s = retirement.settings()
     ess = s.get("spend_essential")
-    months = (bs["own"].get("Cash", 0.0) / ess) if ess else None
+    cash_known = bool(bs["own"].get("Cash")) or not any(
+        p["kind"] == "bank" and p["fx_missing"] for p in tot["platforms"])
+    months = (bs["own"].get("Cash", 0.0) / ess) if (ess and cash_known) else None
     prot = [p for p in tot["platforms"] if p.get("limit") and p["kind"] != "card" and p["total"] > p["limit"] * 0.9]
     tiles.append({"key": "cash", "title": "Cash", "go": "settings",
                   "level": "red" if any(p["total"] > p["limit"] for p in prot) else
                   "amber" if (prot or (months is not None and months < 3)) else "green" if bs["own"].get("Cash") else "none",
                   "value": bs["own"].get("Cash"),
-                  "lines": [f"{months:.1f} months of essentials" if months is not None else "Essentials not entered",
+                  "lines": [f"{months:.1f} months of essentials" if months is not None else
+                            "Waiting for an exchange rate: press Refresh" if not cash_known else "Essentials not entered",
                             (f"{len(prot)} account{'s' if len(prot) != 1 else ''} near a protection limit" if prot
                              else "Every account within its protection limit")]
                   + ([f"Includes {narrative._money(bs['cash_abroad'])} held abroad"] if bs["cash_abroad"] else [])})

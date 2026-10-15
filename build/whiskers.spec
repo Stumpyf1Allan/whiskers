@@ -27,11 +27,21 @@ PKG = ROOT / "folio"
 assert (PKG / "web" / "static" / "app.js").exists(), (
     f"the app's front end is not where the spec is looking: {PKG / 'web' / 'static'}")
 
-datas = [(str(PKG / "web" / "static"), "web/static")]
+# 2.0: the catalogue of UK and South African firms is data, read at run time, so it has
+# to be listed here or the "Find your platform" box comes up empty in a built app.
+datas = [(str(PKG / "web" / "static"), "web/static"),
+         (str(PKG / "institutions" / "data"), "institutions/data")]
+assert (PKG / "institutions" / "data" / "institutions_gb.json").exists(), "the institution catalogue is missing"
 binaries = []
 # cffi's compiled backend is imported from C inside curl_cffi, where PyInstaller's
 # analysis cannot see it; without it the built app quietly fell back to plain Python.
-hiddenimports = ["sqlite3", "webbrowser", "json", "csv", "_cffi_backend", "cffi", "openpyxl"]
+hiddenimports = ["sqlite3", "webbrowser", "json", "csv", "_cffi_backend", "cffi", "openpyxl",
+                 # 2.0's modules are imported inside functions; named here so no build can miss one
+                 "folio.web.routes2", "folio.budget", "folio.budget.categories", "folio.budget.engine",
+                 "folio.budget.ingest", "folio.importers", "folio.importers.investments",
+                 "folio.importers.readers", "folio.importers.mapping", "folio.importers.profiles",
+                 "folio.importers.pdfstatement", "folio.institutions", "folio.institutions.registry",
+                 "folio.institutions.websites", "folio.inbox", "folio.reminders"]
 
 # curl_cffi carries a compiled libcurl. collect_all brings the library, its data and
 # its submodules; without it the frozen app would quietly fall back to plain urllib
@@ -51,7 +61,7 @@ except Exception:
 
 # Optional extras: bundled when installed, silently skipped when not.
 for opt in ("keyring", "keyring.backends.Windows", "keyring.backends.macOS",
-            "keyring.backends.SecretService", "cryptography", "webview"):
+            "keyring.backends.SecretService", "cryptography", "webview", "pdfplumber"):
     try:
         __import__(opt)
         hiddenimports.append(opt)

@@ -43,16 +43,24 @@ def next_due(after: dt.date | None = None) -> dt.date:
 
 
 def _needs_files() -> list[str]:
-    """Platforms that only update from a file: the ones a reminder is for."""
+    """Platforms that only update from a file: the ones a reminder is for. Known from the
+    files already imported, or from the catalogue saying the platform's route is a file."""
     out = []
-    for p in db.rows("SELECT id, name, provider FROM platforms WHERE provider NOT IN ('card','bank','sample')"):
+    for p in db.rows("SELECT id, name, provider, institution FROM platforms WHERE provider NOT IN ('card','bank','sample')"):
         if p["provider"] == "trading212":
             from .brokers import trading212
             if trading212.credentials(p["id"]):
                 continue
         has_file = db.scalar("SELECT COUNT(*) FROM positions WHERE platform_id=? AND source IN ('csv','import')",
                              (p["id"],), 0)
-        if has_file or p["provider"] == "freetrade":
+        by_file = False
+        if p.get("institution") and p["institution"] != "sample":
+            try:
+                from .institutions import registry
+                by_file = registry.next_step(p["institution"])["route"] == "file"
+            except Exception:  # nosec B110  # the catalogue only adds to what the files already say
+                by_file = False
+        if has_file or by_file or p["provider"] == "freetrade":
             out.append(p["name"])
     return out
 

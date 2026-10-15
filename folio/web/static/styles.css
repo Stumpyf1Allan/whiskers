@@ -69,8 +69,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .row.wrap { flex-wrap: wrap; }
 .spread { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .grow { flex: 1; min-width: 0; }
-.stack { display: grid; gap: 14px; }
-.stack-lg { display: grid; gap: 28px; }
+/* align-content: start, so a stack beside a taller neighbour in a grid doesn't share out
+   the spare height among its rows (a select box grew to a third of a screen that way). */
+.stack { display: grid; gap: 14px; align-content: start; }
+.stack-lg { display: grid; gap: 28px; align-content: start; }
 .nowrap { white-space: nowrap; }
 
 /* ------------------------------------------------------------------ privacy
@@ -175,7 +177,7 @@ input[type=text], input[type=number], input[type=password], input[type=search], 
 select { appearance: none; padding-right: 30px; background: var(--panel) var(--chevron) no-repeat right 10px center / 11px 8px; cursor: pointer; }
 input[type=number] { font-family: var(--num); }
 textarea { width: 100%; min-height: 90px; resize: vertical; line-height: 1.45; }
-label.field { display: grid; gap: 4px; font-size: .86rem; color: var(--ink-2); }
+label.field { display: grid; gap: 4px; font-size: .86rem; color: var(--ink-2); align-content: start; }
 label.field .help { color: var(--muted); font-size: .8rem; }
 input[type=range] { width: 100%; accent-color: var(--accent); }
 

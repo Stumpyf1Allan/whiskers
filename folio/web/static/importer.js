@@ -58,14 +58,15 @@ async function vImport(el) {
       <p class="note" style="margin-top:6px">A holdings file is a snapshot: it sets what you hold and what it’s worth on the day it was made. Download a new one each month.</p>
     </section>
   </div>`;
-  wireDropzone($('#dz'));
-  fillWhere();
+  // The screen is drawn off the page and moved on afterwards, so look inside it, not the page.
+  wireDropzone($('#dz', el));
+  fillWhere(el);
   if (S.pendingFile) { const f = S.pendingFile; S.pendingFile = null; setTimeout(() => analyseFile(f), 0); }
 }
 const ordinal = n => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
 
-async function fillWhere() {
-  for (const cell of $$('[data-where]')) {
+async function fillWhere(root) {
+  for (const cell of $$('[data-where]', root)) {
     try { const s = await api(`/api/institutions/${cell.dataset.where}`); cell.textContent = s.where || ''; } catch (e) { /* the row reads fine without it */ }
   }
 }

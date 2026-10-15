@@ -12,6 +12,17 @@ about your portfolio is sent anywhere.
 It is not financial advice. Every figure it shows is arithmetic on your own holdings and
 your own rules.
 
+## Version 2.0 (in testing on the `mega` branch)
+
+2.0 makes Whiskers one app for the whole picture, with five tabs: **Overall** (net worth,
+a health tile per tab, the big picture, dates coming up, and an eight-part **plan
+review** that builds a plan and a market watch around the person using it),
+**Investments** (everything below, plus importing files and a statements folder),
+**Budget** (off until switched on), **Mortgage**, and **Retirement** (a year-by-year plan,
+pensions and the State Pension). Read [docs/WHISKERS-2.md](docs/WHISKERS-2.md) for what each
+part does and what it assumes. To try it without touching an existing copy's data,
+double-click `Try Whiskers 2.0 (test copy).bat`.
+
 ## Setting it up
 
 1. **Unzip it somewhere outside OneDrive**, for example `Documents\Whiskers`. A syncing

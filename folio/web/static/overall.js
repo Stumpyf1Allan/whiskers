@@ -29,16 +29,22 @@ async function vOverall(el) {
         <div class="s">${Object.keys(b.own).length ? Object.keys(b.own).map(k => k.toLowerCase()).join(', ') : 'Nothing added yet'}</div></div>
       <div><div class="k">You owe</div><div class="v">${money(b.total_owe, { dp: 0 })}</div>
         <div class="s">${Object.keys(b.owe).length ? Object.keys(b.owe).map(k => k === 'Cards' ? 'credit cards' : k.toLowerCase()).join(' and ') : 'Nothing owed'}</div></div>
-      <div><div class="k">Pensions promise</div><div class="v">${promised ? `${money(promised, { dp: 0 })}<span class="muted" style="font-size:1rem"> a year</span>` : '—'}</div>
+      <div><div class="k">Pensions promise, a year</div><div class="v">${promised ? money(promised, { dp: 0 }) : '—'}</div>
         <div class="s">${promised ? 'Income for life, not counted in what you own' : 'No final-salary pension or annuity added'}</div></div>
     </div>
     ${b.unconverted.length ? `<div class="panel warnline">No exchange rate yet for ${esc(b.unconverted.join(', '))}, so ${b.unconverted.length === 1 ? 'it is' : 'they are'} left out of these totals. Press Refresh to fetch one.</div>` : ''}
 
     <div class="grid g-main">
-      <section class="panel">
-        <div class="spread"><h2>What you own and owe</h2><button class="btn small ghost" data-act="asset-add">Add your home or something else you own</button></div>
-        ${balanceBlock(b)}
-      </section>
+      <div class="stack">
+        <section class="panel">
+          <div class="spread"><h2>What you own and owe</h2><button class="btn small ghost" data-act="asset-add">Add your home or something else you own</button></div>
+          ${balanceBlock(b)}
+        </section>
+        <section class="panel"><h2>Net worth over time</h2>
+          ${h.length >= 2 ? Charts.line({ series: [{ name: 'Net worth', points: h, color: 'var(--accent)', area: true }], money: true, fmt: v => moneyText(v, 0), yfmt: compactMoney }, 200)
+            : `<p class="muted" style="max-width:70ch">Whiskers writes down your net worth once a day whenever it’s open, so this line starts ${h.length ? `on ${fmtDate(h[0][0])}` : 'today'} and grows from there.</p>`}
+        </section>
+      </div>
       <div class="stack">${miniMonitor(d.market, d.exposure, d.playbook, d.watch_exposure)}
         <section class="panel"><h2>Coming up</h2>
           <p class="lede">Dates worth knowing over the next year, soonest first.</p>
@@ -60,10 +66,6 @@ async function vOverall(el) {
         <div class="alerts" style="margin-top:4px">${d.warnings.length ? d.warnings.map(alertRow).join('') : '<p class="none-state">Nothing needs a look in your investments.</p>'}</div></section>
     </div>
 
-    <section class="panel"><h2>Net worth over time</h2>
-      ${h.length >= 2 ? Charts.line({ series: [{ name: 'Net worth', points: h, color: 'var(--accent)', area: true }], money: true, fmt: v => moneyText(v, 0), yfmt: compactMoney }, 220)
-        : `<p class="muted" style="max-width:70ch">Whiskers writes down your net worth once a day whenever it’s open, so this line starts ${h.length ? `on ${fmtDate(h[0][0])}` : 'today'} and grows from there.</p>`}
-    </section>
     ${d.setup.done < d.setup.of ? setupPanel(d.setup) : ''}
   </div>`;
 }
