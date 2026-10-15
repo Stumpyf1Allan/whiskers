@@ -216,6 +216,53 @@ REFERENCE: dict[str, dict] = {
         why="Widens when lenders get nervous about companies paying their debts back. "
             "A share sell-off with calm credit markets is usually less serious than one "
             "where this is widening too."),
+
+    # ------------------------------------------------------------ fetched only when a
+    # watch theme needs them (2.0). Hidden from the Markets screen; the Market watch shows
+    # them inside the theme that uses them.
+    "REALYIELD": dict(
+        label="US 10-year real yield", unit="%", group="rates", hidden=True, on_demand=True,
+        sources=[("fred", "DFII10")], sleeve_words=[],
+        blurb="The yield on 10-year inflation-protected US government bonds.",
+        why="What holding gold gives up: gold pays nothing, so high real yields make it "
+            "costlier to own."),
+    "BREAKEVEN": dict(
+        label="US 10-year inflation expectation", unit="%", group="rates", hidden=True,
+        on_demand=True, sources=[("fred", "T10YIE")], sleeve_words=[],
+        blurb="The inflation rate bond prices imply over the next ten years (the breakeven).",
+        why="Above 3% means markets doubt inflation will return to target."),
+    "UKCPI": dict(
+        label="UK consumer prices", unit="", group="rates", hidden=True, on_demand=True,
+        sources=[("fred", "GBRCPIALLMINMEI")], sleeve_words=[],
+        blurb="The UK consumer price index, monthly.",
+        why="Read as the rise over twelve months: the inflation rate."),
+    "UKPROP": dict(
+        label="UK property shares (in £)", unit="£", group="sectors", hidden=True, on_demand=True,
+        sources=[("yahoo", "IUKP.L")], sleeve_words=["property", "reit"],
+        blurb="iShares UK Property ETF: London-listed landlords.",
+        why="UK property companies borrow and pay out most of their income, so gilt yields "
+            "move them a lot."),
+    "DXY": dict(
+        label="US dollar index", unit="", group="rates", hidden=True, on_demand=True,
+        sources=[("yahoo", "DX-Y.NYB")], sleeve_words=[],
+        blurb="The dollar against six major currencies.",
+        why="A strong dollar has usually been hard on emerging markets, which often "
+            "borrow in dollars."),
+    "RUT": dict(
+        label="US smaller companies (Russell 2000)", unit="pts", group="markets", hidden=True,
+        on_demand=True, sources=[("yahoo", "^RUT")], sleeve_words=["small"],
+        blurb="The 2,000 smaller companies in the Russell 3000.",
+        why="More tied to borrowing costs and the domestic economy than the giants."),
+    "GBPZAR": dict(
+        label="Pound in rand", unit="R", group="rates", hidden=True, on_demand=True,
+        sources=[("yahoo", "GBPZAR=X")], sleeve_words=[],
+        blurb="How many South African rand one pound buys.",
+        why="When it rises, rand held in South Africa is worth fewer pounds."),
+    "BTC": dict(
+        label="Bitcoin (in £)", unit="£", group="markets", hidden=True, on_demand=True,
+        sources=[("yahoo", "BTC-GBP")], sleeve_words=["crypto"],
+        blurb="Bitcoin's price in pounds.",
+        why="Falls of more than half have happened several times."),
 }
 
 #: FX series: units of the currency per one pound.
@@ -231,3 +278,8 @@ def fx_sources(ccy: str) -> list[tuple[str, str]]:
 
 def visible() -> list[str]:
     return [k for k, v in REFERENCE.items() if not v.get("hidden")]
+
+
+def always() -> list[str]:
+    """Series every copy fetches. The rest are fetched only for a watch theme that uses them."""
+    return [k for k, v in REFERENCE.items() if not v.get("on_demand")]

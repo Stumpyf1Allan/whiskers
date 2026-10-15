@@ -85,6 +85,16 @@ def rule_status(pos: list[dict], totals: dict, exp: dict | None = None) -> list[
         elif r["kind"] == "ai_cap":
             item = {"rule": r, "now": (exp["ai_pct"] * 100) if exp and exp.get("ai_pct") is not None
                     else None, "detail": {}}
+        elif r["kind"] == "exposure_cap":
+            # 2.0: a cap on any watch theme — gold, oil, rand — counting what funds hold.
+            from . import themes
+            key = (r["subject"] or "").strip().lower()
+            if key == "rand":
+                e = next((x for x in themes.all_exposures(pos, totals) if x["theme"] == "rand"), None)
+            else:
+                e = themes.exposure(pos, totals, key)
+            item = {"rule": r, "now": (e["pct"] * 100) if e and e.get("pct") is not None else None,
+                    "detail": {"value": (e or {}).get("value")}}
         else:
             continue
         now = item["now"]
@@ -105,6 +115,9 @@ def _rule_warning(s: dict) -> dict | None:
     if s["level"] not in ("red", "amber"):
         return None
     who = r["subject"] or "AI-linked holdings"
+    if r["kind"] == "exposure_cap":
+        from . import themes
+        who = themes.label(r["subject"] or "")
     basis = " counting what your funds hold too" if r["basis"] == "true" else ""
     if s["level"] == "red":
         title = f"{who} is {now:.1f}% of the portfolio — over your {r['trigger_pct']:g}% trigger"

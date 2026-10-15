@@ -123,14 +123,32 @@ def platforms_summary(pos: list[dict] | None = None) -> list[dict]:
         mine = [x for x in pos if x["platform_id"] == p["id"]]
         invested = sum(x["value"] for x in mine if x["value"] is not None)
         unknown = sum(1 for x in mine if x["value"] is None)
-        total = invested + (p["cash"] or 0.0)
+        # Cash in another currency (rand left in South Africa, say) is kept as the bank
+        # reports it and converted at today's rate wherever pounds are added up. With no
+        # rate it is left out of the totals and said to be, never counted at 1:1.
+        ccy = (p.get("currency") or "GBP").upper()
+        native = p["cash"]
+        cash = native if ccy == "GBP" else store.to_gbp(native, ccy)
+        fx_missing = ccy != "GBP" and native is not None and cash is None
+        total = invested + (cash or 0.0)
+        limit, limit_native, scheme = None, None, None
+        if p["provider"] != "card":
+            if p["provider"] == "bank" and ccy == "ZAR":
+                # South Africa's Corporation for Deposit Insurance: R100,000 per bank.
+                limit_native, scheme = 100000.0, "CoDI"
+                limit = p["limit_gbp"] or store.to_gbp(limit_native, "ZAR")
+            else:
+                limit = p["limit_gbp"] or (DEPOSIT_LIMIT if p["provider"] == "bank" else limit_default)
+                scheme = "FSCS"
         out.append({
             "id": p["id"], "name": p["name"], "provider": p["provider"], "wrapper": p["wrapper"],
             "flexible": bool(p["flexible"]), "holdings": len(mine), "invested": invested,
-            "cash": p["cash"], "cash_as_of": p["cash_as_of"], "cash_source": p["cash_source"],
+            "cash": cash, "cash_as_of": p["cash_as_of"], "cash_source": p["cash_source"],
+            "currency": ccy, "cash_native": native, "fx_missing": fx_missing,
+            "country": p.get("country"), "institution": p.get("institution"),
+            "fee_year": p.get("fee_year"),
             "total": total, "unpriced": unknown,
-            "limit": (None if p["provider"] == "card" else
-                      p["limit_gbp"] or (DEPOSIT_LIMIT if p["provider"] == "bank" else limit_default)),
+            "limit": limit, "limit_native": limit_native, "scheme": scheme,
             "kind": {"bank": "bank", "card": "card"}.get(p["provider"], "platform"),
             "in_plan": bool(p["in_plan"]),
             "reported_total": p["reported_total"], "reported_at": p["reported_at"],

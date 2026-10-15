@@ -516,7 +516,10 @@ def test_loading_the_sample_twice_does_not_build_a_second_portfolio():
     """Mittens & Pence's sample doubled the household when loaded twice."""
     sample.load()
     sample.load()
-    assert db.scalar("SELECT COUNT(*) FROM platforms") == 2
+    # two investment platforms and, since 2.0, two savings accounts (one in rand)
+    assert db.scalar("SELECT COUNT(*) FROM platforms WHERE provider='sample'") == 2
+    assert db.scalar("SELECT COUNT(*) FROM platforms") == 4
+    assert db.scalar("SELECT COUNT(*) FROM mortgages") == 1
     sample.remove()
     assert db.scalar("SELECT COUNT(*) FROM platforms") == 0
     assert db.scalar("SELECT COUNT(*) FROM instruments") == 0
@@ -594,8 +597,23 @@ def _static(name):
     return (STATIC / name).read_text(encoding="utf-8")
 
 
+def _scripts() -> list[str]:
+    """Every script the page loads: 2.0 splits the screens across several files, and a
+    check that read only app.js would pass while a new file broke the rule."""
+    return sorted(p.name for p in STATIC.glob("*.js"))
+
+
+def test_the_page_loads_every_script_and_starts_after_them():
+    html = _static("index.html")
+    loaded = re.findall(r'<script src="([^"]+)"', html)
+    assert sorted(loaded) == _scripts(), "a script file the page doesn't load, or the reverse"
+    assert loaded.index("charts.js") < loaded.index("app.js") == 1
+    # boot() waits for the page, so the screens in the later files exist before the first draw
+    assert "document.addEventListener('DOMContentLoaded', boot)" in _static("app.js")
+
+
 def test_the_interface_loads_nothing_from_the_internet():
-    for name in ("index.html", "app.js", "charts.js", "styles.css"):
+    for name in ["index.html", "styles.css"] + _scripts():
         src = _static(name)
         assert not re.search(r'<script[^>]+src=["\']https?:', src), name
         assert not re.search(r'<link[^>]+href=["\']https?:', src), name
@@ -611,14 +629,14 @@ def test_hide_amounts_is_one_class_on_the_page():
 
 
 def test_no_chart_uses_an_svg_title_which_nothing_can_blur():
-    for name in ("app.js", "charts.js"):
+    for name in _scripts():
         code = re.sub(r"/\*.*?\*/", "", _static(name), flags=re.S)
         code = re.sub(r"(?m)^\s*//.*$", "", code)
         assert "<title" not in code, name
 
 
 def test_every_button_action_has_a_handler():
-    app = _static("app.js")
+    app = "\n".join(_static(n) for n in _scripts())
     used = set(re.findall(r'data-act="([a-z0-9-]+)"', app)) | set(re.findall(r"data-act=\\?'([a-z0-9-]+)", app))
     defined = set(re.findall(r"ACTS\['([a-z0-9-]+)'\]\s*=", app)) | set(re.findall(r"ACTS\.([a-zA-Z0-9_]+)\s*=", app))
     defined |= set(re.findall(r"^\s*'([a-z0-9-]+)':", app, re.M))

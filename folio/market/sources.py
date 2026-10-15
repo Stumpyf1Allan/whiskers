@@ -202,7 +202,9 @@ def stooq(yahoo_symbol: str, key: str) -> dict:
 
 #: Rough starting levels, so synthetic charts look like the thing they stand in for.
 _SYNTH_LEVEL = {"^VIX": 17, "VIXCLS": 17, "BAMLH0A0HYM2": 3.4, "DGS10": 4.2,
-                "GBPUSD=X": 1.30, "DEXUSUK": 1.30, "GBPEUR=X": 1.17, "DEXUSEU": 1.10}
+                "GBPUSD=X": 1.30, "DEXUSUK": 1.30, "GBPEUR=X": 1.17, "DEXUSEU": 1.10,
+                "GBPZAR=X": 21.9, "DFII10": 1.9, "T10YIE": 2.4, "DX-Y.NYB": 99.0,
+                "IRLTLT01GBM156N": 4.7, "GBRCPIALLMINMEI": 135.0}
 
 
 def synthetic(ident: str, days: int = 1400, anchor: float | None = None) -> dict:
@@ -214,7 +216,8 @@ def synthetic(ident: str, days: int = 1400, anchor: float | None = None) -> dict
     seed = int(hashlib.sha1(ident.encode(), usedforsecurity=False).hexdigest()[:8], 16)
     rnd = random.Random(seed)  # nosec B311  # repeatable made-up prices, not security
     level = _SYNTH_LEVEL.get(ident)
-    mean_revert = ident in ("^VIX", "VIXCLS", "BAMLH0A0HYM2", "DGS10")
+    mean_revert = ident in ("^VIX", "VIXCLS", "BAMLH0A0HYM2", "DGS10", "DFII10", "T10YIE",
+                            "IRLTLT01GBM156N")
     if level is None:
         level = 20 + rnd.random() * 400
     drift = 0.0002 + rnd.random() * 0.0005

@@ -58,7 +58,11 @@ def lights_story(lights: list[dict], group: str) -> str:
         return "No data yet for these lights."
     bad = [x for x in known if x["level"] in ("amber", "red")]
     if not bad:
-        text = f"All {len(known)} lights are green. {CALM[group]}"
+        calm = CALM.get(group)
+        if calm is None:
+            from . import themes
+            calm = (themes.LIBRARY.get(group) or {}).get("calm", "Prices are holding their trends.")
+        text = f"All {len(known)} lights are green. {calm}"
         worse = [x["title"] for x in known if x.get("direction") == "worsening"]
         if worse:
             text += f" Heading the wrong way over the past month: {_join(worse)}."
@@ -73,7 +77,8 @@ def lights_story(lights: list[dict], group: str) -> str:
 
 def watch(market: dict, playbook: dict | None) -> dict:
     lights = market.get("lights", [])
-    out = {g: lights_story([x for x in lights if x["group"] == g], g) for g in ("market", "economy", "ai")}
+    groups = ["market", "economy"] + list((market.get("watch") or {}).get("themes") or ["ai"])
+    out = {g: lights_story([x for x in lights if x["group"] == g], g) for g in groups}
     if playbook:
         out["signals"] = signals_story(playbook)
     return out
@@ -183,9 +188,23 @@ def _stress(lights: list[dict]) -> str:
 
 # ---------------------------------------------------------------------------- Overview
 
-def big_picture(market: dict, pb: dict | None, exp: dict, alloc: dict, totals: dict) -> dict:
+def big_picture(market: dict, pb: dict | None, exp: dict, alloc: dict, totals: dict,
+                texp: dict | None = None) -> dict:
     lights = market.get("lights", [])
     groups = market.get("groups", {})
+    w = market.get("watch") or {"main": "ai"}
+    main = w.get("main") or "ai"
+    if main != "ai":
+        title = w.get("main_title") or main
+        theme = f"{title} reads {groups.get(main, {}).get('label', 'no data').lower()}. " + \
+            lights_story([x for x in lights if x["group"] == main], main)
+        if pb:
+            from . import themes
+            fired = [r for r in pb["signals"] if r["group"] == main]
+            if fired:
+                theme += f" Your {themes.lower_first(title)} signals: {sum(1 for r in fired if r['firing'])} of {len(fired)} firing."
+        return _portfolio_paragraphs(theme, market, pb, texp or exp, alloc, totals, title,
+                                     w.get("main_label") or title)
     ai = f"The AI trade reads {groups.get('ai', {}).get('label', 'no data').lower()}. " + \
         lights_story([x for x in lights if x["group"] == "ai"], "ai")
     if pb:
@@ -203,16 +222,25 @@ def big_picture(market: dict, pb: dict | None, exp: dict, alloc: dict, totals: d
         if bits:
             fired = sum(1 for r in pb["signals"] if r["group"] == "ai" and r["firing"])
             ai += f" Your AI signals: {_join(bits)} ({fired} of 3 firing)."
+    return _portfolio_paragraphs(ai, market, pb, exp, alloc, totals, "The AI trade", "AI")
+
+
+def _portfolio_paragraphs(theme: str, market: dict, pb: dict | None, exp: dict, alloc: dict,
+                          totals: dict, title: str, short: str) -> dict:
+    lights = market.get("lights", [])
+    groups = market.get("groups", {})
     mk = f"Markets in general read {groups.get('market', {}).get('label', 'no data').lower()}. " + \
         lights_story([x for x in lights if x["group"] == "market"], "market") + " The economy: " + \
         lights_story([x for x in lights if x["group"] == "economy"], "economy")
     if pb:
-        mk += f" Your eight signals: {pb['firing']} of {pb['of']} firing ({pb['tier']['label'].lower()})."
+        words = {8: "eight"}.get(pb["of"], str(pb["of"]))
+        mk += f" Your {words} signals: {pb['firing']} of {pb['of']} firing ({pb['tier']['label'].lower()})."
     parts = []
-    if exp.get("ai_pct") is not None:
+    pct_key, val_key = ("ai_pct", "ai_value") if "ai_pct" in exp else ("pct", "value")
+    if exp.get(pct_key) is not None:
         top = [t["name"] for t in exp.get("top", [])[:3]]
-        parts.append(f"About {exp['ai_pct'] * 100:.0f}% of your money ({_money(exp['ai_value'])}) rides "
-                     f"on AI" + (f", most of it through {_join(top)}." if top else "."))
+        parts.append(f"About {exp[pct_key] * 100:.0f}% of your money ({_money(exp[val_key])}) rides "
+                     f"on {short if short == 'AI' else short.lower()}" + (f", most of it through {_join(top)}." if top else "."))
     lad = (pb or {}).get("ladder") or {}
     if lad.get("drop") is not None:
         rung = next((r for r in lad["rungs"] if r.get("active")), None)
@@ -229,4 +257,4 @@ def big_picture(market: dict, pb: dict | None, exp: dict, alloc: dict, totals: d
             parts.append(f"{p['name']} is {_money(p['total'] - p['limit'])} over its protection limit.")
     parts.append("None of this predicts what markets do next: it describes what has already "
                  "happened, measured against your own plan.")
-    return {"ai": ai, "markets": mk, "portfolio": " ".join(parts)}
+    return {"ai": theme, "theme": theme, "theme_title": title, "markets": mk, "portfolio": " ".join(parts)}

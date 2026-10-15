@@ -1,8 +1,11 @@
-"""A made-up portfolio to explore the app with, before connecting anything real.
+"""A made-up household to explore the app with, before connecting anything real.
 
-Everything here lives on two platforms whose provider is 'sample', so it can be
-removed without touching anything real. Loading twice changes nothing — Mittens &
-Pence once built a second household when its sample was loaded twice.
+The investments live on two platforms whose provider is 'sample'. Since 2.0 the rest of
+a household comes too: a home and its mortgage, two pensions, savings in pounds and a
+little money in South Africa, and the basics of a retirement plan. Each of those is
+marked as the sample's own (notes or institution 'sample'), so it can all be removed
+without touching anything real. Loading twice changes nothing — Mittens & Pence once
+built a second household when its sample was loaded twice.
 
 The holdings are real, well-known tickers so that live prices and charts work; the
 share counts, costs, deposits and dividends are invented. With no internet the sample
@@ -45,6 +48,36 @@ HOLDINGS = [
 
 PLATFORMS = {"ft": ("Sample — Freetrade ISA", 0, 2400.0),
              "t212": ("Sample — Trading 212 ISA", 1, 1800.0)}
+
+
+SAMPLE_DOB = "1965-06-20"
+#: The retirement basics, used only when nobody has entered their own.
+RETIREMENT = {"dob": SAMPLE_DOB, "stop_age": 63, "spend_essential": 1700, "spend_extra": 700,
+              "salary": 46000, "contrib_pct": 9.8, "contrib_method": "net_pay", "saving_monthly": 300,
+              "nation": "england", "state_pension": {"weekly": 214.5, "years": 31, "gaps": 2}}
+
+
+def _household(c) -> None:
+    """The parts of the sample beyond investments, each marked as the sample's own."""
+    home = c.execute("INSERT INTO assets(name,kind,value,currency,valued_on,is_home,notes,sort) "
+                     "VALUES('Sample — Home','property',325000,'GBP',?,1,'sample',0)", (db.today(),)).lastrowid
+    c.execute("INSERT INTO mortgages(name,lender,currency,original_amount,started_on,term_months,rate,rate_type,"
+              "fixed_until,revert_rate,monthly_payment,repayment_type,statement_balance,statement_on,"
+              "property_asset_id,overpay_allowance,notes,created_at) VALUES('Sample — Home mortgage','Nationwide',"
+              "'GBP',180000,'2013-09-01',300,4.09,'fixed','2027-06-30',7.49,780,'repayment',96000,'2026-04-01',?,"
+              "10,'sample',?)", (home, db.now()))
+    c.execute("INSERT INTO pensions(name,kind,provider,currency,yearly,yearly_as_of,start_age,normal_age,"
+              "early_reduction,commute_factor,indexation,accruing,accrual_yearly,nominee,notes,sort,created_at) "
+              "VALUES('Sample — NHS Pension','db','NHS Business Services Authority','GBP',11800,'2026-03-31',63,67,"
+              "5,12,'cpi',1,650,'',?,1,?)", ("sample", db.now()))
+    c.execute("INSERT INTO pensions(name,kind,provider,currency,pot,pot_as_of,contrib_monthly,take,notes,sort,"
+              "created_at) VALUES('Sample — Workplace pension pot','dc','Aviva','GBP',38000,'2026-04-05',180,"
+              "'drawdown','sample',2,?)", (db.now(),))
+    for name, ccy, country, cash, sort in (("Sample — Easy-access savings", "GBP", "GB", 14000, 20),
+                                           ("Sample — Capitec savings", "ZAR", "ZA", 48000, 21)):
+        c.execute("INSERT INTO platforms(name,provider,wrapper,flexible,in_plan,cash,cash_as_of,cash_source,"
+                  "currency,country,institution,sort) VALUES(?, 'bank', 'cash', 0, 0, ?, ?, 'manual', ?, ?, "
+                  "'sample', ?)", (name, cash, db.now(), ccy, country, sort))
 
 
 def loaded() -> bool:
@@ -116,16 +149,30 @@ def load() -> dict:
             c.execute("INSERT INTO rules(kind,subject,trigger_pct,target_pct,basis,note) VALUES"
                       "('company_cap','Alphabet',9.3,8,'direct','Sample rule: trim Alphabet back "
                       "to 8% when it passes 9.3%.')")
+        _household(c)
+    from . import retirement
+    if not retirement.settings().get("dob"):
+        retirement.save(RETIREMENT)
+        db.set_meta("sample_retirement", SAMPLE_DOB)
     return {"created": True, "sleeves_created": made_sleeves}
 
 
 def remove() -> dict:
     n = db.scalar("SELECT COUNT(*) FROM platforms WHERE provider='sample'", (), 0)
     with db.tx() as c:
-        c.execute("DELETE FROM platforms WHERE provider='sample'")
+        c.execute("DELETE FROM platforms WHERE provider='sample' OR institution='sample'")
+        c.execute("DELETE FROM mortgages WHERE notes='sample'")
+        c.execute("DELETE FROM pensions WHERE notes='sample'")
+        c.execute("DELETE FROM assets WHERE notes='sample'")
         # Instruments nothing else refers to any more.
         c.execute("DELETE FROM instruments WHERE id NOT IN (SELECT instrument_id FROM positions)"
                   " AND id NOT IN (SELECT instrument_id FROM trades WHERE instrument_id IS NOT NULL)"
                   " AND id NOT IN (SELECT instrument_id FROM dividends WHERE instrument_id IS NOT NULL)")
         c.execute("DELETE FROM rules WHERE note LIKE 'Sample rule:%'")
+    # The retirement basics go too, but only if they are still the sample's: somebody who
+    # has typed in their own date of birth since keeps everything they entered.
+    from . import retirement
+    if db.get_meta("sample_retirement") and retirement.settings().get("dob") == db.get_meta("sample_retirement"):
+        db.set_meta("retirement", {})
+    db.set_meta("sample_retirement", None)
     return {"removed": n}

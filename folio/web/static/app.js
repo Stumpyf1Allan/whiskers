@@ -15,7 +15,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const S = { boot: null, view: 'overview', period: { history: 1825, holding: 365, compare: 365 },
+const S = { boot: null, view: 'overall', tab: 'overall', dots: {}, period: { history: 1825, holding: 365, compare: 365 },
             histMode: 'backdated', compare: ['WORLD', 'NDX', 'FTSE100'], refreshTimer: null,
             lastFinished: null, holdingsFilter: { q: '', platform: '' } };
 
@@ -104,6 +104,8 @@ function ago(iso) {
   return d === 1 ? 'yesterday' : d < 30 ? `${d} days ago` : fmtDate(iso);
 }
 const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
+// A title inside a sentence: "The AI trade" becomes "the AI trade"; "UK companies" stays.
+const lowerFirst = t => { t = String(t || ''); const w = t.split(' ')[0]; return w.length > 1 && w === w.toUpperCase() ? t : t.charAt(0).toLowerCase() + t.slice(1); };
 const compactMoney = v => '\u00a3' + (Number.isInteger(v) ? (Math.abs(v) >= 1000 ? Charts.compact(v) : String(v)) : Charts.compact(v));
 const colourOf = level => ({ red: 'var(--red)', amber: 'var(--amber)', info: 'var(--cyan)',
   green: 'var(--green)', ok: 'var(--green)' }[level] || 'var(--grey)');
@@ -118,29 +120,70 @@ const ICONS = {
   markets: '<path d="M4 4v16h16"/><path d="M7.5 15l3.5-4 3 2.5 5-6"/>',
   activity: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>',
   settings: '<path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="var(--panel)"/><circle cx="15" cy="12" r="2" fill="var(--panel)"/><circle cx="8" cy="17" r="2" fill="var(--panel)"/>',
+  overall: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
+  investments: '<path d="M4 19h16"/><path d="M6 15l4-4 3 3 5-6"/><path d="M15 8h3v3"/>',
+  plan: '<path d="M7 3.5h8l3 3V20a.5.5 0 0 1-.5.5h-10A.5.5 0 0 1 7 20z"/><path d="M10 10h5M10 13.5h5M10 17h3"/>',
+  import: '<path d="M12 4v11"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 19.5h15"/>',
+  mortgage: '<path d="M3.5 11 12 4l8.5 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/>',
+  retirement: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>',
+  pensions: '<path d="M4 9h16"/><path d="M5.5 9v8M10 9v8M14 9v8M18.5 9v8"/><path d="M3.5 20h17"/><path d="M12 3.5 20 8H4z"/>',
+  statepension: '<path d="M12 3.5 4.5 7v5c0 4.5 3.2 7.6 7.5 8.5 4.3-.9 7.5-4 7.5-8.5V7z"/><path d="m9 12 2 2 4-4"/>',
+  budget: '<rect x="3.5" y="6" width="17" height="12.5" rx="2"/><path d="M3.5 10h17"/><path d="M15 14.5h2.5"/>',
+  spending: '<path d="M5 19V9M10 19V5M15 19v-7M20 19v-4"/>',
+  transactions: '<path d="M4 7h11M4 12h16M4 17h9"/><path d="m17 4 3 3-3 3"/>',
 };
 const icon = (k, size = 18) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k] || ''}</svg>`;
 
 const VIEWS = {
-  overview: { title: 'Overview', sub: 'Everything at a glance, and anything that needs a look.', render: vOverview },
+  overview: { title: 'Summary', sub: 'Your investments at a glance, and anything that needs a look.', render: vOverview },
   holdings: { title: 'Holdings', sub: 'Every holding, grouped by sleeve. Click one for its chart and settings.', render: vHoldings },
   allocation: { title: 'Allocation', sub: 'What you meant to hold against what you hold, and your own rules.', render: vAllocation },
-  ai: { title: 'Market watch', sub: 'Your eight signals and your ladder, warning lights for markets in general and for the AI trade, and what a fall would cost.', render: vAI },
+  ai: { title: 'Market watch', sub: 'Your signals and your ladder, warning lights for markets in general and for what you watch, and what a fall would cost.', render: vAI },
   markets: { title: 'Markets', sub: 'The indices and prices behind your sleeves, and what each one tells you.', render: vMarkets },
   activity: { title: 'Activity', sub: 'Money in, dividends, trades and the ISA allowance.', render: vActivity },
-  settings: { title: 'Settings', sub: 'Platforms, your plan, rules, data sources and updates.', render: vSettings },
+  settings: { title: 'Settings', sub: 'Tabs, platforms and accounts, your plan, rules, the statements folder, data sources and updates.', render: vSettings },
 };
 
+// The five tabs. Each holds its own screens, which the sidebar lists; Settings belongs to
+// none of them and keeps whichever tab was open. Mortgage and Retirement can be switched
+// off, and the Budget is off until somebody wants it (and only then counts on Overall).
+const TABS = [
+  { key: 'overall', title: 'Overall', views: ['overall', 'plan'] },
+  { key: 'investments', title: 'Investments', views: ['overview', 'holdings', 'allocation', 'ai', 'markets', 'activity', 'import'] },
+  { key: 'budget', title: 'Budget', views: ['budget', 'transactions'], setting: 'budget_on' },
+  { key: 'mortgage', title: 'Mortgage', views: ['mortgage'], setting: 'show_mortgage' },
+  { key: 'retirement', title: 'Retirement', views: ['retirement', 'pensions', 'statepension'], setting: 'show_retirement' },
+];
+const tabOf = view => TABS.find(t => t.views.includes(view));
+const tabOn = t => !t.setting || !!(S.boot && S.boot.settings[t.setting]);
+
 function buildNav() {
-  $('#nav').innerHTML = Object.entries(VIEWS).map(([k, v]) =>
-    `<button type="button" data-view="${k}"><span class="ic">${icon(k)}</span><span class="lbl">${v.title}</span><span class="dot" data-dot="${k}"></span></button>`).join('');
+  const tab = TABS.find(t => t.key === S.tab) || TABS[0];
+  const tabs = TABS.filter(t => tabOn(t) || t.key === S.tab);
+  const worst = t => { const lv = t.views.map(v => S.dots[v]).filter(Boolean);
+    return lv.includes('red') ? 'red' : lv.includes('amber') ? 'amber' : null; };
+  $('#tabs').innerHTML = tabs.map(t => `<button type="button" data-tab="${t.key}" class="${t.key === tab.key && S.view !== 'settings' ? 'on' : ''}"
+      ${t.key === tab.key && S.view !== 'settings' ? 'aria-current="page"' : ''}><span class="ic">${icon(t.key === 'investments' ? 'investments' : t.views[0])}</span><span class="lbl">${t.title}</span><span class="dot" style="background:${worst(t) ? colourOf(worst(t)) : 'transparent'}"></span></button>`).join('');
+  $$('#tabs button').forEach(b => b.addEventListener('click', () => {
+    const t = TABS.find(x => x.key === b.dataset.tab);
+    go(t.key === S.tab && S.view !== 'settings' ? t.views[0] : (S.lastIn && S.lastIn[t.key]) || t.views[0]);
+  }));
+  $('#rail-title').textContent = tab.title;
+  const views = tab.views.filter(v => VIEWS[v]);
+  $('#nav').innerHTML = views.map(k =>
+    `<button type="button" data-view="${k}" class="${k === S.view ? 'on' : ''}"><span class="ic">${icon(k)}</span><span class="lbl">${VIEWS[k].navTitle || VIEWS[k].title}</span><span class="dot" data-dot="${k}" style="background:${S.dots[k] ? colourOf(S.dots[k]) : 'transparent'}"></span></button>`).join('');
   $$('#nav button').forEach(b => b.addEventListener('click', () => go(b.dataset.view)));
+  $('#settings-btn').classList.toggle('on', S.view === 'settings');
 }
 
 function go(view) {
-  if (!VIEWS[view]) view = 'overview';
+  if (!VIEWS[view]) view = 'overall';
+  if (view !== S.view) window.scrollTo({ top: 0, behavior: 'instant' });
   S.view = view;
+  const t = tabOf(view);
+  if (t) { S.tab = t.key; (S.lastIn = S.lastIn || {})[t.key] = view; }
   history.replaceState(null, '', '#' + view);
+  buildNav();
   render();
 }
 
@@ -318,6 +361,7 @@ async function pollRefresh() {
   // when there was no earlier finish time to compare against.
   if (S.wasRunning || (st.finished && S.lastFinished && st.finished !== S.lastFinished)) {
     S.wasRunning = false;
+    if (typeof afterRefresh === 'function') afterRefresh(st);
     if (st.errors && st.errors.length) {
       toast(`Updated, but ${plural(st.errors.length, 'item')} couldn\u2019t be fetched. Settings \u203a Data sources has the details.`, true);
     }
@@ -381,7 +425,7 @@ async function vOverview(el) {
         <div class="alerts" style="margin-top:8px">${warn.length ? warn.map(alertRow).join('') :
           '<p class="none-state">Nothing needs a look. Every sleeve is inside its band and no rule is tripped.</p>'}</div>
       </section>
-      <div class="stack">${miniMonitor(d.market, d.exposure, d.playbook)}${bigPicture(d.big_picture)}</div>
+      <div class="stack">${miniMonitor(d.market, d.exposure, d.playbook, d.watch_exposure)}${bigPicture(d.big_picture)}</div>
     </div>
 
     <section class="panel">
@@ -422,8 +466,16 @@ function alertRow(w) {
 }
 
 function setDot(view, level) {
+  const was = S.dots[view] || null;
+  S.dots[view] = level || null;
   const d = $(`[data-dot="${view}"]`);
   if (d) d.style.background = level ? colourOf(level) : 'transparent';
+  if (was !== (level || null)) {
+    const t = tabOf(view), b = t && $(`#tabs [data-tab="${t.key}"] .dot`);
+    if (b) { const lv = t.views.map(v => S.dots[v]).filter(Boolean);
+      const w = lv.includes('red') ? 'red' : lv.includes('amber') ? 'amber' : null;
+      b.style.background = w ? colourOf(w) : 'transparent'; }
+  }
 }
 
 function sliceSince(points, days) {
@@ -460,27 +512,35 @@ function historyChart(d) {
     money: true, fmt: v => moneyText(v, 0), yfmt: compactMoney }, 260);
 }
 
-// The Overview's monitor is the AI trade only; everything else is in the big picture
-// underneath, and in full on the Market watch screen.
-function miniMonitor(m, exp, pb) {
-  const g = (m.groups || {}).ai || { label: 'No data', score: 0 };
-  const ai = { regime: { Calm: 'calm', Watch: 'watch', Turning: 'turning' }[g.label] || 'none', gauge: g.score || 0, label: g.label };
-  const lights = m.lights.filter(x => x.group === 'ai').map(x => `<div class="row small" style="gap:8px"><span class="lvl ${x.level}" style="background:${monColour(x.level)}"></span><span>${esc(x.title)}</span></div>`).join('');
+// The Summary's monitor is the main thing watched only (the AI trade, unless the plan
+// review chose something else); everything else is in the big picture underneath, and in
+// full on the Market watch screen.
+function miniMonitor(m, exp, pb, wexp) {
+  const w = m.watch || { main: 'ai', main_title: 'The AI trade', main_label: 'AI' };
+  const main = w.main || 'ai';
+  const g = (m.groups || {})[main] || { label: 'No data', score: 0 };
+  const dial = { regime: { Calm: 'calm', Watch: 'watch', Turning: 'turning' }[g.label] || 'none', gauge: g.score || 0, label: g.label };
+  const lights = m.lights.filter(x => x.group === main).map(x => `<div class="row small" style="gap:8px"><span class="lvl ${x.level}" style="background:${monColour(x.level)}"></span><span>${esc(x.title)}</span></div>`).join('');
+  const isAI = main === 'ai';
+  const e = isAI ? { pct: exp.ai_pct, unknown: exp.unknown } : (wexp || {});
+  const what = isAI ? 'AI' : lowerFirst(w.main_label || w.main_title || main);
+  const sig = !pb ? '' : isAI ? ` Your AI signals: ${pb.ai_firing} of 3 firing.`
+    : pb.main_of ? ` Your ${esc(what)} signals: ${pb.main_firing} of ${pb.main_of} firing.` : '';
   return `<section class="monitor" style="cursor:pointer" data-go="ai">
-    <div class="spread"><h2>AI watch</h2><span class="muted small">The AI trade only</span></div>
+    <div class="spread"><h2>${isAI ? 'AI watch' : esc(w.main_title || main)}</h2><span class="muted small">${isAI ? 'The AI trade only' : 'Your main watch'}</span></div>
     <div class="row" style="margin:12px 0 4px;gap:18px;align-items:center">
-      <div style="width:150px;color:var(--mon-ink)">${Charts.gauge(needle(ai), { zones: GAUGE_ZONES, size: 220, label: ai.label })}</div>
-      <div><div class="regime-word ${ai.regime}">${esc(ai.label)}</div>
-      <p class="small" style="margin-top:6px;color:var(--mon-ink)">${known(exp.ai_pct) ? `${pct(exp.ai_pct, { dp: 0 })} of your money rides on AI` : 'AI exposure not worked out yet'}${exp.unknown ? `, ${plural(exp.unknown, 'holding')} not rated` : ''}.${pb ? ` Your AI signals: ${pb.ai_firing} of 3 firing.` : ''}</p></div>
+      <div style="width:150px;color:var(--mon-ink)">${Charts.gauge(needle(dial), { zones: GAUGE_ZONES, size: 220, label: dial.label })}</div>
+      <div><div class="regime-word ${dial.regime}">${esc(dial.label)}</div>
+      <p class="small" style="margin-top:6px;color:var(--mon-ink)">${known(e.pct) ? `${pct(e.pct, { dp: 0 })} of your money rides on ${esc(what)}` : `Exposure to ${esc(what)} not worked out yet`}${e.unknown ? `, ${plural(e.unknown, 'holding')} not rated` : ''}.${sig}</p></div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px">${lights}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px">${lights || '<span class="small muted">No readings yet.</span>'}</div>
   </section>`;
 }
 
 function bigPicture(b) {
   if (!b) return '';
   return `<section class="panel"><h2>The big picture</h2>
-    <h3 style="margin-top:10px">The AI trade</h3><p class="small">${narr(b.ai)}</p>
+    <h3 style="margin-top:10px">${esc(b.theme_title || 'The AI trade')}</h3><p class="small">${narr(b.theme || b.ai)}</p>
     <h3 style="margin-top:12px">Markets and the economy</h3><p class="small">${narr(b.markets)}</p>
     <h3 style="margin-top:12px">What it means for your portfolio</h3><p class="small">${narr(b.portfolio)}</p>
     <p class="note" style="margin-top:10px">Written from today\u2019s readings by fixed rules. Not advice.</p>
@@ -556,16 +616,16 @@ function renderWelcome(el) {
   // Titles are applied by render() once it knows this screen is still the one wanted;
   // setting them here let a slow Overview rename whichever screen was opened next.
   el.dataset.title = 'Welcome';
-  el.dataset.sub = 'Three things to set up, about ten minutes in all.';
+  el.dataset.sub = 'Three things to set up. The Overall tab has the rest: your mortgage, pensions and plan review.';
   el.innerHTML = `<div class="welcome">
     <div class="steps">
       <div class="step"><div class="stack" style="gap:8px"><h3>Your plan</h3>
         ${S.boot.sleeves ? `<p><span class="chip green">Done</span> ${plural(S.boot.sleeves, 'sleeve')} set up. Change them any time in Settings.</p>` : `
         <p class="muted">The sleeves you split your money into, and the share each should have. Answer ten questions for a starting plan, load a plan file someone made for you, or start from a simple template. Every figure can be changed later in Settings.</p>
-        <div class="row wrap"><button class="btn primary" data-act="plan-wizard">Answer some questions</button><button class="btn" data-act="plan-import">Load a plan file</button><button class="btn" data-act="starter">Start from a template</button></div>`}</div></div>
-      <div class="step"><div class="stack" style="gap:8px"><h3>Your platforms</h3>
-        <p class="muted">Trading 212 connects with a read-only key and updates itself. Freetrade has no connection, so it reads the activity file the app exports.</p>
-        <div class="row wrap"><button class="btn" data-act="add-platform" data-kind="trading212">Add Trading 212</button><button class="btn" data-act="add-platform" data-kind="freetrade">Add Freetrade</button><button class="btn ghost" data-act="add-platform" data-kind="other">Another platform</button></div></div></div>
+        <div class="row wrap"><button class="btn primary" data-go="plan">Do the plan review</button><button class="btn" data-act="plan-import">Load a plan file</button><button class="btn" data-act="starter">Start from a template</button></div>`}</div></div>
+      <div class="step"><div class="stack" style="gap:8px"><h3>Where you invest</h3>
+        <p class="muted">Find each platform, bank or pension in the list of over 270 UK and South African firms. Whiskers says for each one how it keeps up to date: Trading 212 and Monzo connect by themselves; Freetrade, Hargreaves Lansdown, AJ Bell, interactive investor and Vanguard come in from the file they let you download; anything else is typed in.</p>
+        <div class="row wrap"><button class="btn primary" data-act="add-from-catalogue">Find your platform or account</button><button class="btn ghost" data-act="add-platform" data-kind="other">Type one in</button></div></div></div>
       <div class="step"><div class="stack" style="gap:8px"><h3>Sort holdings into sleeves</h3>
         <p class="muted">Whiskers suggests a sleeve for each holding. You confirm them on the Allocation screen.</p></div></div>
     </div>
@@ -769,12 +829,68 @@ async function openHolding(iid, period) {
         <div class="row"><input type="text" id="lt-company" placeholder="Company, e.g. Alphabet" style="width:220px"><input type="number" id="lt-weight" placeholder="%" step="0.01" min="0" max="100" style="width:90px"><button class="btn" data-act="lt-add" data-iid="${iid}">Add</button></div>
       </div></details>
 
+    <details id="hi-more" data-iid="${iid}"><summary><b>What moves it, what it costs, and why you own it</b> <span class="muted small">kind of investment, themes, charges, your reasons</span></summary>
+      <div id="hi-more-body" style="margin-top:10px"><div class="spinner"></div></div></details>
+
     ${d.dividends.length ? `<details><summary><b>Dividends</b> <span class="muted small">${plural(d.dividends.length, 'payment')}</span></summary><table class="small" style="max-width:520px;margin-top:8px"><tbody>${d.dividends.slice(0, 40).map(v => `<tr><td>${fmtDate(v.paid_on)}</td><td>${esc(v.platform)}</td><td class="r">${money(v.amount_gbp, { dp: 2 })}</td></tr>`).join('')}</tbody></table></details>` : ''}
     ${d.trades.length ? `<details><summary><b>Trades</b> <span class="muted small">${plural(d.trades.length, 'trade')}</span></summary><table class="small" style="margin-top:8px"><tbody>${d.trades.slice().reverse().slice(0, 60).map(t => `<tr><td>${fmtDate(t.traded_on)}</td><td>${esc(sideWord(t.side))}</td><td class="r num">${+(+t.quantity).toFixed(6)}</td><td class="r">${money(t.value_gbp, { dp: 2 })}</td><td class="muted">${esc(t.platform)}</td></tr>`).join('')}</tbody></table></details>` : ''}
   </div>`;
   openModal({ title: `${i.name || i.symbol} (${tickerText(i)})`, body, wide: true,
     foot: `<button class="btn" data-act="close">Close</button><button class="btn primary" data-act="hold-save" data-iid="${iid}">Save changes</button>` });
+  const more = $('#hi-more');
+  if (more) more.addEventListener('toggle', () => { if (more.open && !more.dataset.loaded) loadHoldingMore(iid); });
 }
+
+// The 2.0 part of a holding: what kind of investment it is, which market forces move it
+// and by how much, what it costs a year, and (for a single company) why it is owned.
+// Each figure says where it came from: typed in, a well-known fund's published make-up,
+// or a guess from the name, so a guess is never mistaken for a fact.
+const HOW = { you: 'set by you', known: 'from the fund\u2019s published make-up', typical: 'typical for this kind of fund',
+  keyword: 'guessed from the name', guess: 'guessed from the name', sleeve: 'from its sleeve', unknown: 'not known', fund: 'from the fund\u2019s factsheet' };
+async function loadHoldingMore(iid) {
+  const box = $('#hi-more-body');
+  let d;
+  try { d = await api(`/api/instrument/${iid}/themes`); } catch (e) { box.innerHTML = `<p class="warnline">${esc(e.message)}</p>`; return; }
+  $('#hi-more').dataset.loaded = '1';
+  const th = d.thesis || {};
+  box.innerHTML = `<div class="grid g2">
+    <div class="stack">
+      <label class="field">Kind of investment<select id="hm-class">${Object.entries(d.asset_classes).map(([k, l]) => `<option value="${k}" ${k === d.asset_class ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+        <span class="help">${esc(HOW[d.asset_class_how] || d.asset_class_how || '')}${d.known_as ? `: ${esc(d.known_as)}` : ''}. Used for the X-Ray, the retirement plan\u2019s growth and the rate and inflation tests.</span></label>
+      <div class="row wrap" style="align-items:flex-start">
+        <label class="field grow">Yearly charge (OCF, %)<input type="number" id="hm-ocf" step="0.01" min="0" max="5" value="${d.ocf_how === 'you' && known(d.ocf) ? d.ocf : ''}" placeholder="${known(d.ocf) ? d.ocf : 'not known'}"><span class="help">${d.single ? 'A single company has no fund charge.' : esc(HOW[d.ocf_how] || '')}</span></label>
+        <label class="field grow">Duration (years, bonds only)<input type="number" id="hm-dur" step="0.1" min="0" max="40" value="${d.duration_how === 'you' && known(d.duration) ? d.duration : ''}" placeholder="${known(d.duration) ? d.duration : '\u2014'}"><span class="help">How much a bond fund falls, in per cent, if rates rise a point. On its factsheet.</span></label>
+      </div>
+    </div>
+    <div><table class="small"><thead><tr><th>What moves it</th><th class="r" style="width:110px">Share %</th><th>Where from</th></tr></thead><tbody>
+      ${d.themes.filter(t => t.theme !== 'ai').map(t => `<tr><td>${esc(t.label)}</td><td class="r"><input type="number" min="0" max="100" step="1" data-theme="${t.theme}" value="${t.source === 'you' && known(t.share) ? t.share : ''}" placeholder="${known(t.share) ? Math.round(t.share) : '?'}" style="width:80px" aria-label="${esc(t.label)} share"></td><td class="tiny muted">${esc(HOW[t.source] || t.source)}</td></tr>`).join('')}
+    </tbody></table><p class="note" style="margin-top:6px">A fund\u2019s share in each, roughly: 100 for a gold fund\u2019s gold, about 8 for a world fund\u2019s healthcare. Blank keeps the figure shown in grey. The AI share is set above.</p></div>
+  </div>
+  ${d.single || th.why ? `<div class="stack" style="margin-top:14px"><h3>Why you own it</h3>
+    <p class="small muted" style="max-width:75ch">Written in calm weather, a reason is the best guide in a fall. Morningstar\u2019s and the Motley Fool\u2019s advice is the same: write down why you bought, and what would make you sell.</p>
+    <div class="grid g2"><label class="field">Why I own it<textarea id="hm-why" placeholder="What the company does that others can\u2019t, and why that should last">${esc(th.why || '')}</textarea></label>
+    <label class="field">What would change my mind<textarea id="hm-break" placeholder="For example: growth below 10% for two years, or losing its biggest customer">${esc(th.breakers || '')}</textarea></label></div>
+    <div class="row wrap"><label class="field">Check again on<input type="date" id="hm-next" value="${esc(th.next_check || '')}"></label>
+      <label class="field">Where it stands<select id="hm-verdict"><option value="">Not judged yet</option>${[['intact', 'Reason intact'], ['watch', 'Watching'], ['impaired', 'Weakened'], ['broken', 'Broken: time to sell']].map(([k, l]) => `<option value="${k}" ${th.verdict === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div></div>` : ''}
+  <div class="row" style="margin-top:12px"><button class="btn primary" data-act="hm-save" data-iid="${iid}">Save these</button><span class="tiny muted">Saved separately from the settings above.</span></div>`;
+  wire(box);
+}
+ACTS['hm-save'] = async b => {
+  const iid = b.dataset.iid;
+  await busy(b, async () => {
+    await api(`/api/instrument/${iid}`, { method: 'PATCH', body: { asset_class: $('#hm-class').value, ocf: $('#hm-ocf').value, duration: $('#hm-dur').value } });
+    const shares = {};
+    $$('[data-theme]', $('#hi-more-body')).forEach(inp => { shares[inp.dataset.theme] = inp.value === '' ? null : inp.value; });
+    await api(`/api/instrument/${iid}/themes`, { method: 'PUT', body: { shares } });
+    if ($('#hm-why')) {
+      await api(`/api/theses/${iid}`, { method: 'PUT', body: { why: $('#hm-why').value, breakers: $('#hm-break').value,
+        next_check: $('#hm-next').value, verdict: $('#hm-verdict').value } });
+    }
+    toast('Saved.');
+    $('#hi-more').dataset.loaded = '';
+    loadHoldingMore(+iid);
+  });
+};
 const sideWord = s => ({ BUY: 'Bought', SELL: 'Sold', ADJUST: 'Corrected by hand', COST: 'Cost corrected', SET: 'Set to match the platform', TRANSFER_IN: 'Transferred in', TRANSFER_OUT: 'Transferred out', CORPORATE: 'Corporate action' }[s] || s);
 
 ACTS['hold-period'] = b => openHolding(+b.dataset.iid, +b.dataset.v);
@@ -856,7 +972,7 @@ async function vAllocation(el) {
   const v = d.view;
   if (!v.sleeves.length) {
     el.innerHTML = `<div class="panel"><h2>No sleeves yet</h2><p class="lede">Sleeves are the parts you split your money into, each with a target share. Load a plan file, or start from the template and edit it.</p>
-      <div class="row"><button class="btn primary" data-act="plan-wizard">Answer some questions</button><button class="btn" data-act="plan-import">Load a plan file</button><button class="btn" data-act="starter">Start from a template</button></div></div>`;
+      <div class="row"><button class="btn primary" data-go="plan">Do the plan review</button><button class="btn" data-act="plan-import">Load a plan file</button><button class="btn" data-act="starter">Start from a template</button></div></div>`;
     return;
   }
   const statusWord = { ok: 'inside its band', amber: 'drifting', red: 'outside its band', none: 'no value yet' };
@@ -1001,11 +1117,22 @@ ACTS['rule-save'] = async b => {
 async function vAI(el) {
   const d = await api('/api/ai');
   const m = d.market, e = d.exposure, t = d.totals;
+  const w = m.watch || { main: 'ai', themes: ['ai'] };
+  const main = w.main || 'ai', isAI = main === 'ai';
+  const themesWatched = (w.themes || ['ai']).filter(g => g !== 'market' && g !== 'economy');
+  const gTitle = g => (m.groups[g] && m.groups[g].title) || { ai: 'The AI trade', market: 'Markets in general', economy: 'The economy and money' }[g] || g;
+  // What the first slider moves: the main watch's money (the AI trade's, unless the plan
+  // review chose something else).
+  const te = d.theme_exposure || {};
+  const mainVal = isAI ? (e.ai_value || 0) : ((te[main] || {}).value || 0);
+  const mainWord = isAI ? 'AI-linked holdings' : `Holdings that ride on ${lowerFirst(w.main_label || gTitle(main))}`;
   setDot('ai', m.regime === 'turning' || m.regime === 'stress' ? 'red' : m.regime === 'watch' ? 'amber' : null);
+  S.groupTitles = Object.fromEntries(Object.entries(m.groups || {}).map(([k, v]) => [k, v.title]));
   const regimeCol = r => ({ calm: 'var(--mon-green)', watch: 'var(--mon-amber)', turning: 'var(--mon-red)', stress: '#b0302a' }[r] || 'var(--mon-line)');
   const strip = m.strip;
   const alarm = m.regime === 'turning' || m.regime === 'stress';
   const plans = d.plans || {};
+  S.mainTitle = isAI ? 'The AI trade' : gTitle(main);
   el.innerHTML = `<div class="stack-lg">
   <section class="monitor">
     <div class="monitor-head">
@@ -1026,9 +1153,10 @@ async function vAI(el) {
     <h3 class="trace-group">The economy and money</h3>
     <div class="traces">${m.lights.filter(x => x.group === 'economy').map(trace).join('')}</div>
     ${d.narratives ? `<p class="trace-note">${narr(d.narratives.economy)}</p>` : ''}
-    <h3 class="trace-group">The AI trade</h3>
-    <div class="traces">${m.lights.filter(x => x.group === 'ai').map(trace).join('')}</div>
-    ${d.narratives ? `<p class="trace-note">${narr(d.narratives.ai)}</p>` : ''}
+    ${themesWatched.map(g => `<h3 class="trace-group">${esc(gTitle(g))}${g === main && themesWatched.length > 1 ? ' <span class="tiny">(your main watch)</span>' : ''}</h3>
+    <div class="traces">${m.lights.filter(x => x.group === g).map(trace).join('') || '<div class="trace none"><div class="words">No lights for this one yet.</div></div>'}</div>
+    ${d.narratives && d.narratives[g] ? `<p class="trace-note">${narr(d.narratives[g])}</p>` : ''}`).join('')}
+    <p class="tiny" style="margin-top:14px;color:var(--mon-muted)">${w.legacy ? 'Watching the AI trade, the original watch. The plan review on the Overall tab can choose what you watch instead.' : `Watching ${themesWatched.map(g => esc(gTitle(g))).join(', ')}, chosen ${w.chosen_at ? fmtDate(w.chosen_at) : 'in the plan review'}.`} <a href="#" data-act="watch-change">Change what you watch</a></p>
   </section>
 
   ${playbookPanels(d.playbook, d.narratives && d.narratives.signals)}
@@ -1036,22 +1164,27 @@ async function vAI(el) {
   ${planPanel(plans, alarm || (d.playbook && d.playbook.tier.level === 'red'))}
 
   <div class="grid g2">
-    <section class="panel"><h2>How much of your money rides on AI</h2>
+    <div class="stack">
+    ${themesWatched.includes('ai') ? `<section class="panel"><h2>How much of your money rides on AI</h2>
       <p class="lede">Companies count in full; funds count for the share of them you have set. An S&P 500 fund is partly AI, because the biggest companies in it are.</p>
       ${exposureBlock(e, t, d.cap)}
-    </section>
+    </section>` : ''}
+    ${themesWatched.filter(g => g !== 'ai' && te[g]).map(g => themeExposureBlock(g, te[g], t)).join('')}
+    ${replaysBlock(d.replays, t)}
+    </div>
     <section class="panel"><h2>What a fall would cost</h2>
       <p class="lede">Move the sliders, or pick an illustration. Cash stays put. This is arithmetic on today\u2019s holdings, not a forecast.</p>
       <div class="pill-row" style="margin-bottom:12px">
         <button class="btn small" data-act="stress-preset" data-ai="20" data-other="5">A correction</button>
         <button class="btn small" data-act="stress-preset" data-ai="45" data-other="20">A bear market</button>
         <button class="btn small" data-act="stress-preset" data-ai="50" data-other="45">2008-sized, everything</button>
-        <button class="btn small" data-act="stress-preset" data-ai="80" data-other="35">Dot-com sized</button>
+        ${isAI ? '<button class="btn small" data-act="stress-preset" data-ai="80" data-other="35">Dot-com sized</button>' : ''}
       </div>
-      <label class="field">AI-linked holdings fall by <b><span id="st-ai-v">40</span>%</b><input type="range" id="st-ai" min="0" max="90" value="40"></label>
+      <label class="field">${esc(mainWord)} fall by <b><span id="st-ai-v">40</span>%</b><input type="range" id="st-ai" min="0" max="90" value="40"></label>
       <label class="field" style="margin-top:8px">Everything else invested falls by <b><span id="st-o-v">15</span>%</b><input type="range" id="st-o" min="0" max="60" value="15"></label>
       <div id="st-out" style="margin-top:14px"></div>
-      <p class="note" style="margin-top:10px">${esc(d.dotcom)}${d.worst ? ` The worst fall for today\u2019s mix in the last five years was ${pct(-d.worst.depth)}, from ${fmtDate(d.worst.peak)} to ${fmtDate(d.worst.trough)}${d.coverage < 0.99 ? ` (covering ${pct(d.coverage, { dp: 0 })} of it)` : ''}.` : ''}</p>
+      <p class="note" style="margin-top:10px">${isAI ? esc(d.dotcom) : ''}${d.worst ? ` The worst fall for today\u2019s mix in the last five years was ${pct(-d.worst.depth)}, from ${fmtDate(d.worst.peak)} to ${fmtDate(d.worst.trough)}${d.coverage < 0.99 ? ` (covering ${pct(d.coverage, { dp: 0 })} of it)` : ''}.` : ''}</p>
+      ${(d.standard || []).length ? `<h3 style="margin-top:16px">Three standard what-ifs</h3><div class="stack" style="gap:8px;margin-top:6px">${d.standard.map(x => `<div class="spread small"><span>${esc(x.label)}<div class="tiny muted">${esc(x.why)}</div></span><b class="fig down nowrap">${money(-x.loss, { dp: 0 })}</b></div>`).join('')}</div>` : ''}
     </section>
   </div>
 
@@ -1066,20 +1199,20 @@ async function vAI(el) {
     const ai = +$('#st-ai').value / 100, oth = +$('#st-o').value / 100;
     $('#st-ai-v').textContent = Math.round(ai * 100);
     $('#st-o-v').textContent = Math.round(oth * 100);
-    const total = t.total || 0, cash = t.cash || 0, aiv = e.ai_value || 0;
+    const total = t.total || 0, cash = t.cash || 0, aiv = mainVal;
     const other = Math.max(0, total - cash - aiv);
     const lossA = aiv * ai, lossO = other * oth, after = total - lossA - lossO;
     const w = v => total ? `${v / total * 100}%` : '0';
     $('#st-out').innerHTML = !total ? '<p class="muted">Nothing to test yet.</p>' : `
       <div class="small muted">Today</div>
       <div style="display:flex;height:16px;border-radius:4px;overflow:hidden;margin:3px 0 8px">
-        <div style="width:${w(aiv)};background:var(--red)" title="AI-linked"></div><div style="width:${w(other)};background:var(--accent)" title="Everything else"></div><div style="width:${w(cash)};background:var(--grey)" title="Cash"></div></div>
+        <div style="width:${w(aiv)};background:var(--red)" title="${esc(mainWord)}"></div><div style="width:${w(other)};background:var(--accent)" title="Everything else"></div><div style="width:${w(cash)};background:var(--grey)" title="Cash"></div></div>
       <div class="small muted">After the fall</div>
       <div style="display:flex;height:16px;border-radius:4px;overflow:hidden;margin:3px 0 10px">
         <div style="width:${w(aiv - lossA)};background:var(--red)"></div><div style="width:${w(other - lossO)};background:var(--accent)"></div><div style="width:${w(cash)};background:var(--grey)"></div></div>
       <div class="spread"><span><span class="fig" style="font-size:1.5rem">${money(after, { dp: 0 })}</span> <span class="muted">from ${money(total, { dp: 0 })}</span></span>
         <span class="fig down" style="font-size:1.3rem">${money(-(lossA + lossO), { dp: 0 })} (${pct(-(lossA + lossO) / total)})</span></div>
-      <div class="tiny muted" style="margin-top:4px">AI-linked part ${money(-lossA, { dp: 0 })}, everything else ${money(-lossO, { dp: 0 })}, cash unchanged.${e.unknown_value ? ` ${money(e.unknown_value, { dp: 0 })} not rated for AI is counted as everything else.` : ''}</div>`;
+      <div class="tiny muted" style="margin-top:4px">${isAI ? 'AI-linked part' : 'That part'} ${money(-lossA, { dp: 0 })}, everything else ${money(-lossO, { dp: 0 })}, cash unchanged.${isAI && e.unknown_value ? ` ${money(e.unknown_value, { dp: 0 })} not rated for AI is counted as everything else.` : ''}</div>`;
   };
   setTimeout(() => { ['#st-ai', '#st-o'].forEach(s => $(s)?.addEventListener('input', draw)); if ($('#st-ai')) draw(); }, 0);
   ACTS['stress-preset'] = b => { $('#st-ai').value = b.dataset.ai; $('#st-o').value = b.dataset.other; draw(); };
@@ -1113,13 +1246,40 @@ function exposureBlock(e, t, cap) {
     ${e.unknown.length ? `<p class="warnline" style="margin-top:8px">Not rated yet: ${e.unknown.slice(0, 6).map(u => `<a href="#" data-holding="${u.instrument_id}">${esc(u.name)}</a>`).join(', ')}${e.unknown.length > 6 ? ` and ${e.unknown.length - 6} more` : ''}. Set an AI share on each, or on its sleeve in Settings.</p>` : ''}`;
 }
 
+// The same picture as the AI exposure, for any other theme being watched.
+function themeExposureBlock(g, x, t) {
+  if (!t.total) return '';
+  const w = v => `${Math.max(0, v / t.total * 100)}%`;
+  const other = Math.max(0, t.total - (t.cash || 0) - (x.value || 0));
+  return `<section class="panel"><h2>How much of your money rides on ${esc(lowerFirst(x.label || x.title))}</h2>
+    <p class="lede">Companies in it count in full; funds count for the share of them in it, from what you have set or from a typical make-up for well-known funds.</p>
+    <div class="row" style="align-items:baseline;gap:12px"><span class="fig" style="font-size:2.2rem">${pct(x.pct, { dp: 0 })}</span><span>${money(x.value, { dp: 0 })} of ${money(t.total, { dp: 0 })}</span></div>
+    <div style="display:flex;height:14px;border-radius:4px;overflow:hidden;margin:10px 0 6px">
+      <div style="width:${w(x.value || 0)};background:var(--red)"></div><div style="width:${w(other)};background:var(--accent)"></div><div style="width:${w(t.cash || 0)};background:var(--grey)"></div></div>
+    ${(x.top || []).length ? `<table class="small" style="margin-top:10px"><thead><tr><th>Biggest contributors</th><th class="r">Share in it</th><th class="r">Counts as</th></tr></thead><tbody>
+      ${x.top.slice(0, 8).map(r => `<tr class="click" data-holding="${r.instrument_id}"><td>${esc(r.name)}</td><td class="r num">${Math.round(r.share)}%${r.source === 'typical' ? '<span class="tiny muted"> typical</span>' : ''}</td><td class="r">${money(known(r.theme_value) ? r.theme_value : r.value, { dp: 0 })}</td></tr>`).join('')}</tbody></table>` : ''}
+    ${(x.unknown || []).length ? `<p class="warnline" style="margin-top:8px">Not known yet for ${x.unknown.slice(0, 5).map(u => `<a href="#" data-holding="${u.instrument_id}">${esc(u.name)}</a>`).join(', ')}. Open each and set its share under \u201cWhat moves it\u201d.</p>` : ''}
+  </section>`;
+}
+
+// Each watched theme's own worst fall of the last five years, replayed on today's money:
+// a scenario taken from history rather than made up.
+function replaysBlock(list, t) {
+  if (!list || !list.length || !t.total) return '';
+  return `<section class="panel"><h2>Their worst falls, replayed</h2>
+    <p class="lede">For each thing you watch: its worst fall of the last five years, with today\u2019s holdings. Its part falls as it did; everything else invested moves as world shares did over the same dates.</p>
+    <div class="stack" style="gap:10px">${list.map(r => `<div class="spread small"><span><b>${esc(r.title)}</b> fell ${pct(r.depth, { dp: 0 })}, ${fmtDate(r.peak)} to ${fmtDate(r.trough)}${known(r.world_move) ? `<div class="tiny muted">World shares moved ${pct(r.world_move, { sign: true, dp: 0 })} over the same dates.</div>` : ''}</span>
+      <b class="fig down nowrap">${money(-r.loss, { dp: 0 })}</b></div>`).join('')}</div>
+    <p class="note" style="margin-top:8px">History, not a forecast: the next fall will be a different shape.</p></section>`;
+}
+
 function planPanel(plans, alarm) {
   const ai = plans.ai?.body || '', crash = plans.crash?.body || '';
   const editing = S.editPlans || (!ai && !crash);
   if (!editing) {
     return `<section class="plan-box ${alarm ? 'alarm' : ''}"><div class="spread"><h2>${alarm ? 'Your plan, written in calm weather' : 'Your plan'}</h2><button class="btn small" data-act="plan-edit">Edit</button></div>
       <div class="grid g2" style="margin-top:10px">
-        <div><h3>If the AI trade turns</h3><p class="plan-text">${esc(ai) || '<span class="muted">Not written yet.</span>'}</p></div>
+        <div><h3>If ${esc(S.mainTitle ? lowerFirst(S.mainTitle) : 'the AI trade')} turns</h3><p class="plan-text">${esc(ai) || '<span class="muted">Not written yet.</span>'}</p></div>
         <div><h3>In any big fall</h3><p class="plan-text">${esc(crash) || '<span class="muted">Not written yet.</span>'}</p></div>
       </div>
       <p class="tiny muted" style="margin-top:8px">${plans.ai?.updated_at ? `Last changed ${ago(plans.ai.updated_at)}.` : ''}</p></section>`;
@@ -1127,7 +1287,7 @@ function planPanel(plans, alarm) {
   return `<section class="plan-box"><h2>Write down your plan while things are calm</h2>
     <p class="small" style="margin:4px 0 12px;max-width:75ch">Decided in advance, a plan is much easier to follow than a decision made during a fall. It appears at the top of this screen, in red, whenever the lights turn.</p>
     <div class="grid g2">
-      <label class="field">If the AI trade turns, I will\u2026<textarea id="plan-ai" placeholder="For example: keep contributing monthly, rebalance back to target once the Tech sleeve leaves its band, not sell anything else.">${esc(ai)}</textarea></label>
+      <label class="field">If ${esc(S.mainTitle ? lowerFirst(S.mainTitle) : 'the AI trade')} turns, I will\u2026<textarea id="plan-ai" placeholder="For example: keep contributing monthly, rebalance back to target once the Tech sleeve leaves its band, not sell anything else.">${esc(ai)}</textarea></label>
       <label class="field">In any big fall, I will\u2026<textarea id="plan-crash" placeholder="For example: not look more than weekly, use cash to top up whichever sleeves fall below their bands.">${esc(crash)}</textarea></label>
     </div>
     <div class="row" style="margin-top:10px"><button class="btn primary" data-act="plan-save">Save my plan</button>${ai || crash ? '<button class="btn ghost" data-act="plan-cancel">Cancel</button>' : ''}</div></section>`;
@@ -1235,14 +1395,24 @@ async function vSettings(el) {
   const up = await api('/api/update').catch(() => null);
   const s = d.settings;
   const tsum = d.sleeves.reduce((a, x) => a + x.target, 0);
+  const extra = where => (SETTINGS_PANELS[where] || []).map(f => { try { return f(d); } catch (e) { return ''; } }).join('');
   el.innerHTML = `<div class="stack-lg">
-    <section class="panel"><div class="spread"><h2>Platforms</h2><div class="row"><button class="btn" data-act="add-platform" data-kind="trading212">Add Trading 212</button><button class="btn" data-act="add-platform" data-kind="freetrade">Add Freetrade</button><button class="btn ghost" data-act="add-platform" data-kind="other">Another</button></div></div>
+    <section class="panel"><h2>Tabs</h2>
+      <p class="lede">Overall and Investments are always there. Switch the others on or off; a tab that is off is left out of the Overall picture too.</p>
+      <div class="checks">
+        <label><input type="checkbox" data-act="tab-toggle" data-key="show_mortgage" ${s.show_mortgage ? 'checked' : ''}><span><b>Mortgage</b><br><span class="small muted">The balance running down, the date the fixed rate ends, and what an overpayment would save.</span></span></label>
+        <label><input type="checkbox" data-act="tab-toggle" data-key="show_retirement" ${s.show_retirement ? 'checked' : ''}><span><b>Retirement</b><br><span class="small muted">Your pensions, the State Pension, and a year-by-year plan to the end of retirement.</span></span></label>
+        <label><input type="checkbox" data-act="tab-toggle" data-key="budget_on" ${s.budget_on ? 'checked' : ''}><span><b>Budget</b><br><span class="small muted">Bank statements, spending by category and monthly budgets. Off unless you want it; only counted on Overall when it is on.</span></span></label>
+      </div>
+    </section>
+    ${extra('top')}
+    <section class="panel"><div class="spread"><h2>Platforms</h2><div class="row wrap"><button class="btn primary" data-act="add-from-catalogue">Find your platform or account</button><button class="btn" data-act="add-platform" data-kind="trading212">Add Trading 212</button><button class="btn" data-act="add-platform" data-kind="freetrade">Add Freetrade</button><button class="btn ghost" data-act="add-platform" data-kind="other">Type one in</button></div></div>
       <p class="lede">Each platform is checked against the protection limit on its own, because FSCS protection is per firm.</p>
       <div class="stack">${d.platforms.some(p => p.kind === 'platform') ? d.platforms.filter(p => p.kind === 'platform').map(platformRow).join('<hr class="soft">') : '<p class="muted">None yet.</p>'}</div>
     </section>
 
-    <section class="panel"><div class="spread"><h2>Your plan</h2><div class="row"><button class="btn" data-act="plan-wizard">Build a plan from questions</button><button class="btn" data-act="plan-import">Load a plan file</button><button class="btn" data-act="plan-export">Save a copy of your plan</button></div></div>
-      ${d.plan_loaded ? `<p class="note">Plan file last loaded ${fmtDate(d.plan_loaded.at)}.</p>` : '<p class="warnline">No plan file loaded yet. Load one to set your sleeves, targets, rules and playbook in one go.</p>'}
+    <section class="panel"><div class="spread"><h2>Your plan</h2><div class="row"><button class="btn" data-go="plan">Do the plan review</button><button class="btn" data-act="plan-import">Load a plan file</button><button class="btn" data-act="plan-export">Save a copy of your plan</button></div></div>
+      ${d.plan_loaded ? `<p class="note">Plan last set ${fmtDate(d.plan_loaded.at)}.</p>` : '<p class="small muted">The plan review on the Overall tab builds your sleeves, targets, rules and watch from your answers. A plan file sets them in one go instead.</p>'}
       <p class="lede">Sleeves and their targets. Targets must add up to 100. A blank band uses the 5/25 rule; the AI share is the default for holdings in that sleeve.</p>
       <div class="table-wrap"><table class="small"><thead><tr><th>Sleeve</th><th class="r">Target %</th><th class="r">Band \u00b1</th><th class="r">AI share %</th><th>Cash sleeve</th><th>Colour</th><th></th></tr></thead><tbody>
         ${d.sleeves.map(x => `<tr data-sleeve="${x.id}">
@@ -1268,6 +1438,7 @@ async function vSettings(el) {
     </section>
 
     ${cashPanel(d)}
+    ${extra('middle')}
 
     <section class="panel"><h2>Where prices come from</h2>
       <p class="lede">Yahoo Finance\u2019s public charts for share prices, and FRED, the St. Louis Federal Reserve\u2019s free data service, for rates, credit spreads, the VIX and exchange rates. Neither needs an account.</p>
@@ -1280,8 +1451,8 @@ async function vSettings(el) {
         <button class="btn" data-act="refresh-all">Fetch everything again</button></div>
     </section>
 
-    <section class="panel"><h2>Sample portfolio</h2>
-      <p class="lede">A made-up portfolio on two sample platforms, for trying things out. Remove it before connecting your own platforms, or its made-up holdings will count in your totals.</p>
+    <section class="panel"><h2>Sample household</h2>
+      <p class="lede">A made-up household for trying things out: investments on two sample platforms, a home and its mortgage, two pensions, savings in pounds and in rand, and the basics of a retirement plan. Remove it before adding your own, or its made-up figures count in your totals.</p>
       ${d.sample ? '<button class="btn danger" data-act="sample-remove">Remove the sample</button>' : '<button class="btn" data-act="sample-load">Load the sample</button>'}
     </section>
 
@@ -1296,9 +1467,27 @@ async function vSettings(el) {
         <label class="row small"><input type="checkbox" data-act="toggle-refresh" ${s.refresh_on_open ? 'checked' : ''}>Refresh when Whiskers opens</label></div>
       <p class="note" style="margin-top:6px">Export to a spreadsheet makes an Excel file of everything: your holdings, dividends, trades, cash movements and how you\u2019re allocated against your plan.</p>
     </section>
+    ${extra('bottom')}
+    <section class="panel"><h2>Help</h2>
+      <p class="lede">Something wrong, or an idea? The Help button opens an email to ${esc(S.boot.settings.help_email || 'Allan')} with the app\u2019s version and the screen you were on. Nothing about your money goes in it.</p>
+      <button class="btn" data-act="help-email">Email for help</button>
+    </section>
     <p class="note">Whiskers is a personal tool for keeping to your own plan. It is not financial advice. It only ever reads from your platforms and cannot place a trade.</p>
   </div>`;
 }
+
+// Other screens' files add their own Settings panels here: { top, middle, bottom }.
+const SETTINGS_PANELS = { top: [], middle: [], bottom: [] };
+ACTS['tab-toggle'] = async b => {
+  const key = b.dataset.key;
+  try {
+    await api('/api/settings', { method: 'PATCH', body: { [key]: b.checked } });
+    S.boot.settings[key] = b.checked;
+    buildNav();
+    toast(b.checked ? 'Switched on. It\u2019s in the tabs along the top.' : 'Switched off. Nothing in it is deleted; switch it back on any time.');
+  } catch (e) { toast(e.message, true); b.checked = !b.checked; }
+};
+ACTS['help-email'] = () => openHelpEmail();
 
 function updateWords(u) {
   if (u.status === 'off') return 'Not set up in this copy.';
@@ -1499,7 +1688,7 @@ ACTS['limits-save'] = async b => {
 ACTS['stooq-save'] = async b => { await busy(b, async () => { await api('/api/settings', { method: 'PATCH', body: { stooq_key: $('#set-stooq').value } }); toast('Saved.'); }); };
 ACTS['refresh-all'] = () => { startRefresh(true); toast('Fetching every series again. This takes a minute or two.'); };
 ACTS['sample-remove'] = async b => {
-  if (!await confirmBox('Remove the sample portfolio?', 'The two sample platforms and everything on them go. Your own platforms are not touched. Sleeves stay, so you can keep or change them.', 'Remove the sample', true)) return;
+  if (!await confirmBox('Remove the sample household?', 'Everything marked \u201cSample\u201d goes: the two sample platforms and their holdings, the sample home, mortgage, pensions and savings, and the sample\u2019s retirement basics unless you have changed them. Your own things are not touched. Sleeves stay, so you can keep or change them.', 'Remove the sample', true)) return;
   await busy(b, async () => { await api('/api/sample/remove', { method: 'POST' }); await refreshBoot(); toast('Sample removed.'); render(); });
 };
 ACTS['upd-check'] = async b => { await busy(b, async () => { const u = await api('/api/update/check', { method: 'POST' }); toast(updateWords(u).replace(/<[^>]+>/g, '')); checkUpdateBanner(); render(); }); };
@@ -1640,7 +1829,12 @@ async function boot() {
   applyHide();
   buildNav();
   $('#fake-banner').hidden = !S.boot.app.fake_market;
+  if (S.boot.app.tagline) $('#brand-sub').textContent = S.boot.app.tagline;
   $('#refresh-btn').addEventListener('click', () => startRefresh(false));
+  $('#settings-btn').addEventListener('click', () => go('settings'));
+  $('#help').addEventListener('click', openHelpEmail);
+  wireLogo();
+  if (typeof wireDrop === 'function') wireDrop();
   $('#tour-btn').addEventListener('click', () => startTour());
   // Web links open in your own browser, whichever window Whiskers is running in: inside
   // the app window a plain link would replace Whiskers itself with the web page.
@@ -1660,15 +1854,68 @@ async function boot() {
   $('#boot').remove();
   $('#app').hidden = false;
   const want = location.hash.slice(1);
-  go(VIEWS[want] ? want : 'overview');
+  go(VIEWS[want] ? want : 'overall');
   if (!S.boot.settings.toured) setTimeout(() => startTour(), 900);
   pollRefresh();
   checkUpdateBanner();
   setInterval(checkUpdateBanner, 30 * 60 * 1000);
+  if (typeof checkReminder === 'function') { checkReminder(); setInterval(checkReminder, 60 * 60 * 1000); }
   syncPull();
 }
 
-boot();
+// The screens live in several files (overall.js, mortgage.js, retirement.js and the rest),
+// loaded after this one. Starting once the page has finished loading means every screen
+// is registered before the first one is drawn.
+document.addEventListener('DOMContentLoaded', boot);
+
+// ============================================================================ the logo
+// From Mittens & Pence: the cat does her ten seconds, then sits still for two to three
+// minutes. Restarting a CSS animation needs the class off, a reflow, and the class back
+// on; setting it twice in the same frame does nothing.
+let logoTimer;
+function playLogo() {
+  const el = $('#logo');
+  if (!el) return;
+  el.classList.remove('playing');
+  void el.offsetWidth;
+  el.classList.add('playing');
+}
+function scheduleLogo(first = false) {
+  clearTimeout(logoTimer);
+  const wait = first ? 1200 : (120 + Math.random() * 60) * 1000;
+  logoTimer = setTimeout(() => { playLogo(); scheduleLogo(); }, wait);
+}
+function wireLogo() {
+  const el = $('#logo');
+  if (!el) return;
+  el.addEventListener('animationend', e => { if (e.animationName === 'sprite-y') el.classList.remove('playing'); });
+  el.addEventListener('click', () => { playLogo(); scheduleLogo(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) clearTimeout(logoTimer); else scheduleLogo(); });
+  scheduleLogo(true);
+}
+
+// ============================================================================ help
+// From Mittens & Pence: one button that opens the person's own email with enough in it to
+// make a report useful. Nothing financial goes in: the version, the screen, the system.
+function helpBody() {
+  const b = S.boot || {}, app = b.app || {};
+  return ['', '', '\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014',
+    'Sent from the Help button. The details below save describing the setup; delete them if you',
+    'would rather not send them. No account or balance details are included.',
+    `App: ${app.name || 'Whiskers'} ${app.version || ''}`.trim(), `Screen: ${S.view || 'unknown'}`,
+    `Device: ${onAndroid() ? 'Android phone' : navigator.platform || 'unknown'}`,
+    `Date: ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`].join('\n');
+}
+async function openHelpEmail() {
+  const to = (S.boot && S.boot.settings.help_email) || 'allan.michaelclark@gmail.com';
+  const url = `mailto:${to}?subject=${encodeURIComponent(`${(S.boot && S.boot.app.name) || 'Whiskers'}: `)}&body=${encodeURIComponent(helpBody())}`;
+  try {
+    const r = await api('/api/open-url', { method: 'POST', body: { url } });
+    if (r && r.opened === false) throw new Error(r.problem || 'nothing opened');
+  } catch (e) {
+    toast(`If no email opened, write to ${to}.`);
+  }
+}
 
 
 // ============================================================================ the playbook
@@ -1676,7 +1923,9 @@ boot();
 function playbookPanels(pb, story) {
   if (!pb) return '';
   const lvl = pb.tier.level;
-  const groups = [['market', 'Markets in general'], ['ai', 'The AI trade']];
+  const seen = [...new Set(pb.signals.map(x => x.group))];
+  const titles = { market: 'Markets in general', ai: 'The AI trade', economy: 'The economy and money' };
+  const groups = seen.map(g => [g, (pb.titles && pb.titles[g]) || titles[g] || (S.groupTitles && S.groupTitles[g]) || g]);
   return `<div class="grid g-main">
     <section class="panel"><div class="spread"><h2>Your signals</h2><span class="chip ${lvl}">${pb.firing} of ${pb.of} firing: ${esc(pb.tier.label)}</span></div>
       <p class="lede">${esc(pb.tier.text)} None of these is a sell signal. They say what kind of fall this is, not whether to stay invested.</p>
@@ -1741,8 +1990,11 @@ function cashPanel(d) {
   const bankRow = x => {
     const auto = x.monzo_linked;
     const monzoish = /monzo/i.test(x.name);
-    return `<tr><td><b>${esc(x.name)}</b><div class="tiny muted">${x.cash_as_of ? `${auto ? 'From Monzo, ' : 'Updated '}${ago(x.cash_as_of)}` : 'No balance yet'}${x.last_error ? ` <span class="warnline">${esc(x.last_error)}</span>` : ''}</div></td>
-      <td class="r">${auto ? `<span class="fig">${money(x.cash)}</span>` : `<input type="number" step="0.01" id="bank-${x.id}" value="${known(x.cash) ? x.cash : ''}" style="width:130px" aria-label="Balance for ${esc(x.name)}">`}</td>
+    const foreign = x.currency && x.currency !== 'GBP';
+    const native = foreign ? x.cash_native : x.cash;
+    const codi = x.scheme === 'CoDI' && known(x.cash_native) ? ` CoDI covers R100,000 per bank: ${x.cash_native > 100000 ? `<span class="warnline">R${Math.round(x.cash_native - 100000).toLocaleString('en-GB')} over</span>` : 'all of it covered'}.` : '';
+    return `<tr><td><b>${esc(x.name)}</b>${foreign ? ` <span class="chip">${esc(x.currency)}</span>` : ''}<div class="tiny muted">${x.cash_as_of ? `${auto ? 'From Monzo, ' : 'Updated '}${ago(x.cash_as_of)}` : 'No balance yet'}${foreign ? (x.fx_missing ? ' <span class="warnline">No exchange rate yet: press Refresh. Left out of totals until then.</span>' : `, ${money(x.cash)} at today\u2019s rate.`) : ''}${codi}${x.last_error ? ` <span class="warnline">${esc(x.last_error)}</span>` : ''}</div></td>
+      <td class="r">${auto ? `<span class="fig">${money(x.cash)}</span>` : `<input type="number" step="0.01" id="bank-${x.id}" value="${known(native) ? native : ''}" style="width:130px" aria-label="Balance for ${esc(x.name)} in ${esc(x.currency || 'GBP')}">`}</td>
       <td><input type="checkbox" data-act="bank-plan" data-id="${x.id}" ${x.in_plan ? 'checked' : ''} aria-label="Count ${esc(x.name)} in my plan"></td>
       <td class="r nowrap">${auto ? `<button class="btn small ghost" data-act="monzo-forget" data-id="${x.id}">Disconnect</button>`
         : `${monzoish ? `<button class="btn small" data-act="monzo-connect" data-id="${x.id}">Connect automatically</button> ` : ''}<button class="btn small" data-act="bank-save" data-id="${x.id}">Save</button>`}
@@ -1756,25 +2008,28 @@ function cashPanel(d) {
   return `<section class="panel"><div class="spread"><h2>Cash and cards</h2>
       <div class="row"><button class="btn" data-act="bank-add">Add a cash account</button><button class="btn" data-act="card-add">Add a credit card</button></div></div>
     <p class="lede">Bank and savings accounts such as HSBC or Spring, and credit cards such as Amex or Barclaycard. Type balances in when they change; Monzo can update itself. They sit beside your portfolio, not inside it: cards are taken off your cash, and a cash account counts in your Cash sleeve only if you tick \u201cPart of my plan\u201d.</p>
-    ${banks.length ? `<div class="table-wrap"><table><thead><tr><th>Cash account</th><th class="r">Balance (\u00a3)</th><th>Part of my plan</th><th></th></tr></thead><tbody>${banks.map(bankRow).join('')}</tbody></table></div>` : ''}
+    ${banks.length ? `<div class="table-wrap"><table><thead><tr><th>Cash account</th><th class="r">Balance, in its own currency</th><th>Part of my plan</th><th></th></tr></thead><tbody>${banks.map(bankRow).join('')}</tbody></table></div>` : ''}
     ${cards.length ? `<div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Credit card</th><th class="r">Owed (\u00a3)</th><th></th></tr></thead><tbody>${cards.map(cardRow).join('')}</tbody></table></div>` : ''}
     ${banks.length || cards.length ? `<p class="small" style="margin-top:10px">Cash less cards: <b class="fig">${money(net)}</b></p>` : '<p class="muted">None yet.</p>'}
-    <p class="note" style="margin-top:8px">The FSCS protects bank deposits up to \u00a3120,000 per person per banking licence. Brands that share a licence share one limit (Spring is part of Paragon Bank, for one).</p>
+    <p class="note" style="margin-top:8px">The FSCS protects bank deposits up to \u00a3120,000 per person per banking licence. Brands that share a licence share one limit (Spring is part of Paragon Bank, for one). In South Africa, CoDI covers R100,000 per person per bank. Money in another currency is converted at each day\u2019s rate wherever pounds are added up.</p>
   </section>`;
 }
 
 ACTS['bank-add'] = () => openModal({
   title: 'Add a cash account',
   body: `<div class="stack">
-    <label class="field">Name<input type="text" id="bank-name" placeholder="For example, HSBC"></label>
-    <label class="field">Balance (\u00a3)<input type="number" step="0.01" id="bank-bal"></label>
+    <label class="field">Name<input type="text" id="bank-name" placeholder="For example, HSBC, or Capitec in South Africa"></label>
+    <div class="row wrap" style="align-items:flex-end">
+      <label class="field">Currency<select id="bank-ccy"><option value="GBP">Pounds (GBP)</option><option value="ZAR">Rand (ZAR)</option><option value="EUR">Euros (EUR)</option><option value="USD">US dollars (USD)</option></select></label>
+      <label class="field grow">Balance, in that currency<input type="number" step="0.01" id="bank-bal"></label></div>
     <label class="row small"><input type="checkbox" id="bank-inplan"> Part of my plan: count this balance in my Cash sleeve</label></div>`,
   foot: '<button class="btn primary" data-act="bank-create">Add the account</button>',
 });
 ACTS['bank-create'] = async () => {
   const name = $('#bank-name').value.trim();
   if (!name) { toast('Give the account a name.', true); return; }
-  await api('/api/platforms', { method: 'POST', body: { name, provider: 'bank', cash: $('#bank-bal').value, in_plan: $('#bank-inplan').checked } });
+  await api('/api/platforms', { method: 'POST', body: { name, provider: 'bank', cash: $('#bank-bal').value, in_plan: $('#bank-inplan').checked, currency: $('#bank-ccy').value, country: $('#bank-ccy').value === 'ZAR' ? 'ZA' : 'GB' } });
+  pollRefresh();
   closeModal();
   toast(`${name} added.`);
   render();
@@ -1901,19 +2156,19 @@ ACTS.gone = async b => {
 // itself once, and again whenever the Tour button or Settings asks. A step whose part of
 // the screen isn't there yet (a brand-new copy has no holdings) is shown in the middle.
 const TOUR = [
-  { title: 'Welcome to Whiskers', text: 'Your investments, the limits you set for them, and what markets are doing, in one place. It only ever reads from your platforms: it cannot buy, sell or move money. This tour takes about a minute.', sample: true },
-  { title: 'Seven screens', target: '#nav', text: 'Overview for the headlines, Holdings for each investment, Allocation for your plan, Market watch for warning lights, Markets for the indices behind them, Activity for money in and out, and Settings to connect everything.' },
-  { title: 'Your totals', view: 'overview', target: '.figures', text: 'What everything is worth, what you paid, cash waiting to be invested and dividends. A figure nobody can price is left out and flagged, never counted as zero.' },
-  { title: 'Things to look at', view: 'overview', target: '.alerts', text: 'Anything past a limit you set, worst first: red to act on, amber to watch, blue for information. Each one says how long it has been like that, and clicking it takes you to the screen that explains it.' },
-  { title: 'AI watch and the big picture', view: 'overview', target: '.monitor', text: 'The AI trade at a glance, then three short paragraphs: the AI trade, markets and the economy, and what it all means for your own portfolio.' },
-  { title: 'Every holding', view: 'holdings', target: '.table-wrap', text: 'Grouped into your sleeves, with a year\u2019s price line for each. Click a holding for its chart, its details, and to correct anything the platform got wrong.' },
-  { title: 'Your plan against reality', view: 'allocation', target: '.bands', text: 'Each sleeve against its target. The tick is the target, the dot is where you are: green is fine, amber is drifting, red is outside its band. \u201cPut new money to work\u201d shows where a contribution would do most good.' },
-  { title: 'Market watch', view: 'ai', target: '.monitor', text: 'Warning lights for markets in general, the economy, and the AI trade, each judged on a week\u2019s readings rather than one day. They describe what has already happened; none of them can predict what happens next.' },
-  { title: 'Markets', view: 'markets', target: 'p.narrative', text: 'The indices, rates and commodities behind your holdings, each section with a short summary of what it is saying.' },
-  { title: 'Setting up', view: 'settings', target: '.panel', text: () => `Connect Trading 212 with a read-only key, import Freetrade\u2019s activity file, add bank accounts and cards, and load or build your plan. Nothing leaves your ${DEVICE()}.` },
-  { title: 'Keeping it up to date', target: '#refresh-btn', text: 'Refresh fetches the latest prices and updates any connected accounts. Whiskers also does this each time it opens.' },
+  { title: 'Welcome to Whiskers', text: 'Everything you own and owe, in one place: your investments, your mortgage, your pensions and a plan for retirement. It only ever reads from your accounts: it cannot buy, sell or move money. This tour takes about a minute.', sample: true },
+  { title: 'Five tabs', target: '#tabs', text: () => `Along the ${innerWidth <= 600 ? 'bottom' : 'top'}: Overall for the whole picture, Investments for everything you hold, Mortgage, and Retirement for your pensions and a year-by-year plan. A Budget tab can be switched on in Settings.` },
+  { title: 'The whole picture', view: 'overall', target: '.figures', text: 'What you own, what you owe, and the difference. A pension that promises an income is shown as income, never counted as money you could spend tomorrow.' },
+  { title: 'How each part is doing', view: 'overall', target: '.tiles', text: 'One tile for each tab, with a light: green is fine, amber is worth a look, red needs attention. Click one to go there.' },
+  { title: 'Your plan review', view: 'plan', target: '.parts', text: 'Eight short sets of questions, saved as you go, that become a plan built around you: how much risk suits you, what to keep an eye on, your own rules, and a list of things worth doing.' },
+  { title: 'The screens in each tab', target: '#nav', text: 'The sidebar lists the screens inside the tab that is open. Investments has a summary, every holding, your allocation, the market watch, markets, activity, and importing files.' },
+  { title: 'Market watch', view: 'ai', target: '.monitor', text: 'Warning lights for markets in general, the economy, and whatever moves most of your money, each judged on a week of readings rather than one day. They describe what has already happened; none of them can predict what happens next.' },
+  { title: 'Importing files', view: 'import', target: '.dropzone', text: 'Drop a statement or holdings file anywhere on the window. Or keep a statements folder: anything put in it is read the next time you press Refresh.' },
+  { title: 'Retirement, year by year', view: 'retirement', target: '.panel', text: 'Each year from now to the end of the plan, in today\u2019s money: what comes in, what goes out, and which pot pays the difference. Stress tests show what a bad few years would do.' },
+  { title: 'Keeping it up to date', target: '#refresh-btn', text: 'Refresh fetches the latest prices, updates any connected accounts and reads your statements folder. Whiskers also does this each time it opens.' },
+  { title: 'Settings and help', target: '#settings-btn', text: () => `Settings switches tabs on and off and connects your accounts. The Help button in the sidebar emails Allan, with nothing about your money in it. Nothing leaves your ${DEVICE()} otherwise.` },
   { title: 'Hide amounts', target: '#hide-btn', text: 'Blurs every pound figure, for when someone can see your screen. Percentages stay visible.' },
-  { title: 'That\u2019s it', text: 'The Tour button in the sidebar, and Settings, bring this back any time. Nothing here is financial advice: Whiskers measures your portfolio against your own plan.' },
+  { title: 'That\u2019s it', text: 'The Tour button, and Settings, bring this back any time. Nothing here is financial advice: Whiskers measures your money against your own plan.' },
 ];
 let tourAt = -1;
 
@@ -2042,7 +2297,7 @@ ACTS.tour = () => startTour();
 window.whiskersBack = () => {
   if (tourAt >= 0) { endTour(); return true; }
   if (!$('#modal').hidden) { closeModal(); return true; }
-  if (S.view !== 'overview') { go('overview'); return true; }
+  if (S.view !== 'overall') { go('overall'); return true; }
   return false;
 };
 

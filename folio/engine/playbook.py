@@ -86,8 +86,34 @@ def manual_values() -> dict:
     return db.get_meta("manual_signals", {}) or {}
 
 
+def signals_for(w: dict | None = None) -> list[dict]:
+    """The signals for a watch: the five market ones always, then each watched theme's.
+    The original AI watch gives Allan's eight, in the same order."""
+    from . import themes
+    w = w or themes.watch()
+    out = [d for d in SIGNALS if d["group"] == "market"]
+    for t in w["themes"]:
+        out += [d for d in SIGNALS if d["group"] == "ai"] if t == "ai" else themes.signals_for(t)
+    return out
+
+
+def _all_templates() -> list[dict]:
+    from . import themes
+    out = list(SIGNALS)
+    for t in themes.SIGNALS.values():
+        out += t
+    return out
+
+
+def tiers_for(n: int) -> list[dict]:
+    """Normal, elevated and structural, at a quarter and a half of the signals firing —
+    2 and 4 of the original eight."""
+    elev, struct = max(1, round(n * 0.25)), max(2, round(n * 0.5))
+    return [dict(TIERS[0]), dict(TIERS[1], **{"from": elev}), dict(TIERS[2], **{"from": struct})]
+
+
 def set_manual(key: str, value=None, ticked: list | None = None) -> dict:
-    defn = next((s for s in SIGNALS if s["key"] == key and s["kind"] == "manual"), None)
+    defn = next((s for s in _all_templates() + signals_for() if s["key"] == key and s["kind"] == "manual"), None)
     if not defn:
         raise KeyError(key)
     vals = manual_values()
@@ -110,6 +136,23 @@ def _auto(defn: dict, ov: dict) -> dict:
     on one day: daily series use a 5-day average, like the market lights."""
     ref = defn["ref"]
     extra = {}
+    measure = defn.get("measure")
+    if measure:
+        if isinstance(ref, tuple) and ref[0] == "SEC":
+            pts = store.gbp_points(store.sec_key(ref[1]))
+        else:
+            pts = store.points(store.ref_key(ref))
+        if not pts:
+            return {"value": None, "as_of": None, "series": []}
+        if measure == "drawdown":
+            dd = mathx.drawdowns([v for _, v in pts], 252)
+            pts = [(d, x * 100) for (d, _), x in zip(pts, dd)]
+        elif measure == "yoy":
+            from .signals import _yoy
+            pts = _yoy(pts)
+        if not pts:
+            return {"value": None, "as_of": None, "series": []}
+        return {"value": pts[-1][1], "as_of": pts[-1][0], "series": pts, "averaged": False}
     if isinstance(ref, tuple):
         pts = mathx.ratio(store.points(store.ref_key(ref[0])), store.points(store.ref_key(ref[1])))
         if not pts:
@@ -149,13 +192,15 @@ def _streak(series: list, op: str, threshold: float) -> dict:
     return {"since": series[i][0], "change_1m": change}
 
 
-def evaluate(backdated: dict | None = None, cash_value: float | None = None) -> dict:
+def evaluate(backdated: dict | None = None, cash_value: float | None = None,
+             w: dict | None = None) -> dict:
     ov = overrides()
     sig_ov = ov.get("signals") or {}
     manual = manual_values()
     today = dt.date.today()
     rows = []
-    for d in SIGNALS:
+    defs = signals_for(w)
+    for d in defs:
         o = sig_ov.get(d["key"]) or {}
         threshold = float(o.get("threshold", d["threshold"]))
         row = {k: d[k] for k in ("key", "title", "group", "kind", "op", "unit", "means")}
@@ -175,7 +220,7 @@ def evaluate(backdated: dict | None = None, cash_value: float | None = None) -> 
         rows.append(row)
     firing = sum(1 for r in rows if r["firing"])
     known = sum(1 for r in rows if r["firing"] is not None)
-    tiers = [dict(t, text=(ov.get("tiers") or {}).get(t["label"].lower(), t["text"])) for t in TIERS]
+    tiers = [dict(t, text=(ov.get("tiers") or {}).get(t["label"].lower(), t["text"])) for t in tiers_for(len(defs))]
     tier = [t for t in tiers if firing >= t["from"]][-1]
     manual_rows = [r for r in rows if r["kind"] == "manual"]
     return {"signals": rows, "firing": firing, "known": known, "of": len(rows), "tier": tier,

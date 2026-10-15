@@ -111,15 +111,61 @@ REGIMES = {
 
 
 def _series(ref) -> list[tuple[str, float]]:
+    """A light's series: one reference series, a ratio of two, a holding's own price
+    ("SEC", symbol), or an equal-weighted basket of holdings ("BASKET", symbol, ...)."""
     if isinstance(ref, tuple):
+        if ref and ref[0] == "SEC":
+            return store.gbp_points(store.sec_key(ref[1]))
+        if ref and ref[0] == "BASKET":
+            return basket([store.gbp_points(store.sec_key(s)) for s in ref[1:]])
         return mathx.ratio(store.points(store.ref_key(ref[0])), store.points(store.ref_key(ref[1])))
     return store.points(store.ref_key(ref))
 
 
+def basket(series: list[list[tuple[str, float]]]) -> list[tuple[str, float]]:
+    """Several holdings as one: each rebased to 100 where they all have prices, averaged."""
+    series = [s for s in series if len(s) > 20]
+    if not series:
+        return []
+    start = max(s[0][0] for s in series)
+    maps, bases = [], []
+    for s in series:
+        m = {d: v for d, v in s if d >= start}
+        b = next((v for d, v in s if d >= start), None)
+        if not b:
+            continue
+        maps.append(m)
+        bases.append(b)
+    if not maps:
+        return []
+    days = sorted(set().union(*[set(m) for m in maps]))
+    last = [None] * len(maps)
+    out = []
+    for d in days:
+        for i, m in enumerate(maps):
+            if d in m:
+                last[i] = m[d] / bases[i] * 100
+        if all(v is not None for v in last):
+            out.append((d, sum(last) / len(last)))
+    return out
+
+
+def _yoy(pts: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """Twelve-month % change of a monthly index (consumer prices into an inflation rate)."""
+    out = []
+    for d, v in pts:
+        then = mathx.value_on(pts, (dt.date.fromisoformat(d) - dt.timedelta(days=366)).isoformat())
+        if then:
+            out.append((d, (v / then - 1) * 100))
+    return out
+
+
 def levels_for(defn: dict, pts: list[tuple[str, float]]) -> list[tuple[str, str, float | None]]:
     """(date, level, measure) for every day there is enough history to judge."""
+    if defn["kind"] == "yoy":
+        pts = _yoy(pts)
     raw = [v for _, v in pts]
-    n = int(defn.get("smooth", SMOOTH))
+    n = int(defn.get("smooth", SMOOTH if defn["kind"] != "yoy" else 1))
     vals = [s if s is not None else r for s, r in zip(mathx.sma(raw, n), raw)] if n > 1 else raw
     pts = [(d, v) for (d, _), v in zip(pts, vals)]
     out = []
@@ -133,7 +179,11 @@ def levels_for(defn: dict, pts: list[tuple[str, float]]) -> list[tuple[str, str,
             gap = v / a - 1
             prev = avg[i - 20] if i >= 20 else None
             falling = prev is not None and a < prev
-            lvl = "green" if gap >= 0 else ("red" if falling else "amber")
+            if defn.get("invert"):          # a rising dollar is the warning, not a falling one
+                rising = prev is not None and a > prev
+                lvl = "green" if gap <= 0 else ("red" if rising else "amber")
+            else:
+                lvl = "green" if gap >= 0 else ("red" if falling else "amber")
             out.append((d, lvl, gap))
     elif kind == "drawdown":
         dd = mathx.drawdowns(vals, 252)
@@ -142,9 +192,16 @@ def levels_for(defn: dict, pts: list[tuple[str, float]]) -> list[tuple[str, str,
                 continue                            # too little history for a "high"
             x = dd[i]
             out.append((d, "red" if x >= defn["red"] else "amber" if x >= defn["amber"] else "green", x))
-    elif kind == "level":
+    elif kind in ("level", "yoy"):
         for d, v in pts:
             out.append((d, "red" if v >= defn["red"] else "amber" if v >= defn["amber"] else "green", v))
+    elif kind == "rise":
+        for i, (d, v) in enumerate(pts):
+            if i < 60:
+                continue
+            low = min(vals[max(0, i - 251):i + 1])
+            x = (v / low - 1) if low else 0.0
+            out.append((d, "red" if x >= defn["red"] else "amber" if x >= defn["amber"] else "green", x))
     elif kind == "curve":
         for i, (d, v) in enumerate(pts):
             year = vals[max(0, i - 250):i + 1]
@@ -155,7 +212,7 @@ def levels_for(defn: dict, pts: list[tuple[str, float]]) -> list[tuple[str, str,
 
 #: Which way is worse, for the direction arrow: a higher reading for levels and falls,
 #: a lower one for trends and the yield curve.
-_WORSE_IF_HIGHER = {"level", "drawdown"}
+_WORSE_IF_HIGHER = {"level", "drawdown", "rise", "yoy"}
 
 
 def _trend(defn: dict, lv: list) -> dict:
@@ -170,10 +227,10 @@ def _trend(defn: dict, lv: list) -> dict:
     direction = "steady"
     if then is not None and now is not None:
         move = now - then
-        scale = abs(then) if defn["kind"] == "level" and then else 1.0
-        tolerance = 0.05 * scale if defn["kind"] == "level" else (0.1 if defn["kind"] == "curve" else 0.01)
+        scale = abs(then) if defn["kind"] in ("level", "yoy") and then else 1.0
+        tolerance = 0.05 * scale if defn["kind"] in ("level", "yoy") else (0.1 if defn["kind"] == "curve" else 0.01)
         if abs(move) > tolerance:
-            worse = move > 0 if defn["kind"] in _WORSE_IF_HIGHER else move < 0
+            worse = move > 0 if (defn["kind"] in _WORSE_IF_HIGHER or defn.get("invert")) else move < 0
             direction = "worsening" if worse else "improving"
     return {"since": lv[start][0], "days": (dt.date.fromisoformat(d0) -
                                             dt.date.fromisoformat(lv[start][0])).days,
@@ -202,11 +259,17 @@ def _words(defn: dict, lvl: str, measure: float, pts: list, extra: dict) -> str:
         if measure < 0.005:
             return "At or near its high of the past year"
         return f"{measure * 100:.1f}% below its high of the past year ({_day(extra['high_on'])})"
+    if k == "rise":
+        if measure < 0.005:
+            return "At or near its low of the past year"
+        return f"{measure * 100:.1f}% above its low of the past year"
+    if k == "yoy":
+        return f"{measure:.1f}% over twelve months: amber from {defn['amber']}%, red from {defn['red']}%"
     if k == "curve":
         return (f"{measure:+.2f} points: inverted" if measure < 0 else
                 f"{measure:+.2f} points, back up after a long inversion" if lvl == "red" else
                 f"{measure:+.2f} points, not inverted")
-    unit = "%" if defn["key"] in ("credit", "ig") else ""
+    unit = "%" if defn["key"] in ("credit", "ig", "real_yield", "breakeven", "uk10y_level", "us10y_level") else ""
     avg = " (5-day average)" if int(defn.get("smooth", SMOOTH)) > 1 else ""
     return f"{measure:.2f}{unit}{avg}: amber from {defn['amber']}{unit}, red from {defn['red']}{unit}"
 
@@ -214,11 +277,15 @@ def _words(defn: dict, lvl: str, measure: float, pts: list, extra: dict) -> str:
 def reading(defn: dict) -> dict:
     pts = _series(defn["ref"])
     base = {"key": defn["key"], "title": defn["title"], "sub": defn["sub"], "group": defn["group"],
-            "explain": EXPLAIN[defn["key"]], "level": "none", "words": "", "as_of": None,
-            "spark": [], "history": []}
+            "explain": defn.get("explain") or EXPLAIN.get(defn["key"], ""), "level": "none", "words": "",
+            "as_of": None, "spark": [], "history": []}
     if not pts:
         refs = defn["ref"] if isinstance(defn["ref"], tuple) else (defn["ref"],)
-        errs = [(store.meta(store.ref_key(r)) or {}).get("last_error") for r in refs]
+        if refs and refs[0] in ("SEC", "BASKET"):
+            keys = [store.sec_key(r) for r in refs[1:]]
+        else:
+            keys = [store.ref_key(r) for r in refs]
+        errs = [(store.meta(k) or {}).get("last_error") for k in keys]
         base["words"] = next((e for e in errs if e), "Not fetched yet.")
         return base
     lv = levels_for(defn, pts)
@@ -244,7 +311,11 @@ def reading(defn: dict) -> dict:
     return base
 
 
-def regime_of(ai_levels: list[str], mkt_levels: list[str]) -> tuple[str, float]:
+def regime_of(ai_levels: list[str], mkt_levels: list[str], theme_n: int = 4) -> tuple[str, float]:
+    """One reading from the main watch theme's lights and the market's. `ai_levels` is the
+    main theme's (named for the AI trade, the original and still the default). A theme
+    turns when its lights add up to half their worst — two reds of the AI trade's four, or
+    one red of a two-light theme — so a theme with fewer lights is judged as fairly."""
     score = {"green": 0, "amber": 1, "red": 2}
     ai = [score[x] for x in ai_levels if x in score]
     mk = [score[x] for x in mkt_levels if x in score]
@@ -252,20 +323,38 @@ def regime_of(ai_levels: list[str], mkt_levels: list[str]) -> tuple[str, float]:
         return "none", 0.0
     a, m = sum(ai), sum(mk)
     gauge = (a + m) / (2 * (len(ai) + len(mk)))
-    if (a >= 4 and m >= 4) or m >= 6:
+    turn = max(1, int(theme_n))
+    if (a >= turn and m >= 4) or m >= 6:
         return "stress", gauge
-    if a >= 4 or m >= 4:
+    if a >= turn or m >= 4:
         return "turning", gauge
     if a >= 1 or m >= 1:
         return "watch", gauge
     return "calm", gauge
 
 
-def evaluate() -> dict:
-    lights = [reading(d) for d in DEFS]
-    ai = [x["level"] for x in lights if x["group"] == "ai"]
+def defs_for(w: dict | None = None) -> list[dict]:
+    """The lights for a watch: markets and the economy always, then each watched theme's.
+    The original AI watch comes out exactly as it always has, in the same order."""
+    from . import themes
+    w = w or themes.watch()
+    out = [d for d in DEFS if d["group"] in ("market", "economy") or (d["group"] == "ai" and "ai" in w["themes"])]
+    for t in w["themes"]:
+        if t != "ai":
+            out += themes.lights_for(t)
+    return out
+
+
+def evaluate(w: dict | None = None) -> dict:
+    from . import themes
+    w = w or themes.watch()
+    defs = defs_for(w)
+    main = w["main"]
+    main_n = sum(1 for d in defs if d["group"] == main) or 4
+    lights = [reading(d) for d in defs]
+    ai = [x["level"] for x in lights if x["group"] == main]
     mk = [x["level"] for x in lights if x["group"] == "market"]
-    regime, gauge = regime_of(ai, mk)
+    regime, gauge = regime_of(ai, mk, main_n)
     have = sum(1 for x in lights if x["level"] != "none")
 
     # The same judgement for every day of the last two years, so the strip shows how
@@ -279,30 +368,40 @@ def evaluate() -> dict:
         for k in per_light:
             if d in per_light[k]:
                 last[k] = per_light[k][d]
-        r, _ = regime_of([last[x["key"]] for x in lights if x["group"] == "ai" and last[x["key"]]],
-                         [last[x["key"]] for x in lights if x["group"] == "market" and last[x["key"]]])
+        r, _ = regime_of([last[x["key"]] for x in lights if x["group"] == main and last[x["key"]]],
+                         [last[x["key"]] for x in lights if x["group"] == "market" and last[x["key"]]],
+                         main_n)
         strip.append([d, r])
     for x in lights:
         x.pop("history", None)
-    groups = {g: group_reading([x["level"] for x in lights if x["group"] == g], g)
-              for g in ("market", "economy", "ai")}
+    group_keys = ["market", "economy"] + list(w["themes"])
+    groups = {g: dict(group_reading([x["level"] for x in lights if x["group"] == g], g, sum(1 for d in defs if d["group"] == g)),
+                      title=themes.title(g) if g not in ("market", "economy") else
+                      {"market": "Markets in general", "economy": "The economy and money"}[g])
+              for g in group_keys}
+    if "ai" not in groups:
+        groups["ai"] = {"label": "Not watched", "level": "none", "score": 0.0, "have": 0, "title": "The AI trade"}
     return {"regime": regime, "label": REGIMES[regime]["label"], "text": REGIMES[regime]["text"],
             "gauge": gauge, "lights": lights, "have": have, "of": len(lights), "strip": strip,
-            "groups": groups}
+            "groups": groups, "watch": {"main": main, "themes": list(w["themes"]), "legacy": w.get("legacy", False),
+                                        "main_title": themes.title(main), "main_label": themes.label(main),
+                                        "chosen_at": w.get("chosen_at")}}
 
 
-def group_reading(levels: list[str], group: str) -> dict:
-    """One word for one group of lights. The AI trade uses the same words as the overall
-    reading; the economy's gauges move slowly, so any red there is already a warning."""
+def group_reading(levels: list[str], group: str, n: int = 4) -> dict:
+    """One word for one group of lights. A theme uses the same words as the overall
+    reading, turning at half its worst; the economy's gauges move slowly, so any red there
+    is already a warning."""
     score = {"green": 0, "amber": 1, "red": 2}
     got = [score[x] for x in levels if x in score]
     if not got:
         return {"label": "No data", "level": "none", "score": 0.0, "have": 0}
     total, reds = sum(got), sum(1 for x in levels if x == "red")
+    turn = 4 if group in ("market", "ai") else max(1, n)
     if group == "economy":
         label, level = (("Warning", "red") if reds else ("Watch", "amber") if total else ("Calm", "green"))
     else:
-        label, level = (("Turning", "red") if total >= 4 else ("Watch", "amber") if total else ("Calm", "green"))
+        label, level = (("Turning", "red") if total >= turn else ("Watch", "amber") if total else ("Calm", "green"))
     return {"label": label, "level": level, "score": total / (2 * len(got)), "have": len(got)}
 
 

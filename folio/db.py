@@ -159,12 +159,172 @@ CREATE TABLE IF NOT EXISTS plans(topic TEXT PRIMARY KEY, body TEXT, updated_at T
 
 CREATE TABLE IF NOT EXISTS snapshots(
   d TEXT PRIMARY KEY, value REAL, cash REAL, cost REAL, detail TEXT);
+
+-- ---------------------------------------------------------------- 2.0: the whole picture
+-- Everything below is new in 2.0 and purely additive: a 1.x copy opening this database
+-- ignores these tables, so going back a version never breaks anything.
+
+-- Things owned that are not investments or cash: the house, mostly. One figure per thing,
+-- so a mortgage links to its house rather than keeping a second value that can disagree.
+CREATE TABLE IF NOT EXISTS assets(
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'property',       -- property | vehicle | other
+  value REAL,                                  -- NULL = nobody has said
+  currency TEXT DEFAULT 'GBP',
+  valued_on TEXT,
+  is_home INTEGER NOT NULL DEFAULT 0,          -- the main home (inheritance tax's residence band)
+  notes TEXT,
+  sort INTEGER DEFAULT 0
+);
+
+-- Brought from Mittens & Pence, standing on its own rather than hanging off a bank
+-- account: the mortgage is the record.
+CREATE TABLE IF NOT EXISTS mortgages(
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  lender TEXT,
+  currency TEXT DEFAULT 'GBP',
+  original_amount REAL,
+  started_on TEXT,
+  term_months INTEGER,
+  rate REAL,                                   -- annual %, e.g. 4.29
+  rate_type TEXT DEFAULT 'fixed',              -- fixed | variable | tracker | discount
+  fixed_until TEXT,
+  revert_rate REAL,
+  monthly_payment REAL,
+  payment_day INTEGER,
+  repayment_type TEXT DEFAULT 'repayment',     -- repayment | interest_only | part_and_part
+  statement_balance REAL,
+  statement_on TEXT,
+  property_value REAL,
+  property_valued_on TEXT,
+  property_asset_id INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+  overpay_allowance REAL,                      -- % of the balance a year without a charge
+  erc_note TEXT,                               -- early repayment charges, in her words
+  split_payments INTEGER DEFAULT 1,
+  payment_category TEXT,
+  notes TEXT,
+  created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS mortgage_events(
+  id INTEGER PRIMARY KEY,
+  mortgage_id INTEGER NOT NULL REFERENCES mortgages(id) ON DELETE CASCADE,
+  happened_on TEXT NOT NULL,
+  kind TEXT NOT NULL,                          -- statement | overpayment | rate_change | valuation
+  amount REAL, rate REAL, note TEXT, created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_mortgage_events ON mortgage_events(mortgage_id, happened_on);
+
+-- Every pension: a final-salary or career-average promise (db), a pot (dc), an annuity
+-- already bought, a South African retirement annuity (sa_ra). The State Pension is not a
+-- row here; it lives with the retirement settings, from the person's own forecast.
+CREATE TABLE IF NOT EXISTS pensions(
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'dc',             -- db | dc | annuity | sa_ra
+  provider TEXT,
+  currency TEXT DEFAULT 'GBP',
+  pot REAL, pot_as_of TEXT,                    -- a pot's value from its latest statement
+  yearly REAL, yearly_as_of TEXT,              -- a promise: pension a year, today's money
+  start_age REAL,                              -- when it will be (or was) taken
+  normal_age REAL,                             -- the scheme's own pension age
+  early_reduction REAL,                        -- % less for each year taken early
+  lump_sum REAL,                               -- an automatic lump sum, as some schemes pay
+  commute_pct REAL,                            -- % of the pension swapped for cash
+  commute_factor REAL,                         -- £ of cash per £1 a year given up (often 12)
+  indexation TEXT DEFAULT 'cpi',               -- cpi | capped | fixed | none
+  index_cap REAL,                              -- capped or fixed increases, % a year
+  accruing INTEGER NOT NULL DEFAULT 0,         -- still building up while working
+  accrual_yearly REAL,                         -- extra pension a year earned per year worked
+  contrib_monthly REAL,                        -- a pot: you and your employer, a month
+  growth REAL,                                 -- a pot: % a year above inflation; NULL = plan's
+  charges REAL,                                -- a pot: % a year
+  take TEXT DEFAULT 'drawdown',                -- a pot: drawdown | annuity | lump
+  spouse_pct REAL,
+  nominee TEXT,
+  in_plan INTEGER NOT NULL DEFAULT 0,          -- a pot you invest yourself, in the sleeves
+  notes TEXT,
+  sort INTEGER DEFAULT 0,
+  created_at TEXT
+);
+
+-- How much of each holding a market force can move: "this fund is 21% AI, 8% healthcare".
+-- The AI share keeps living on instruments.ai_share, so a 1.x copy still reads it.
+CREATE TABLE IF NOT EXISTS exposures(
+  instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+  theme TEXT NOT NULL,
+  share REAL NOT NULL,                         -- 0-100
+  source TEXT,                                 -- you | factsheet | default
+  as_of TEXT,
+  PRIMARY KEY(instrument_id, theme)
+);
+
+-- Why a single company is owned, and what would change the person's mind.
+CREATE TABLE IF NOT EXISTS theses(
+  instrument_id INTEGER PRIMARY KEY REFERENCES instruments(id) ON DELETE CASCADE,
+  why TEXT, breakers TEXT, next_check TEXT, verdict TEXT, updated_at TEXT
+);
+
+-- A file's column layout, remembered so the second month is a single click.
+CREATE TABLE IF NOT EXISTS import_mappings(
+  id INTEGER PRIMARY KEY,
+  signature TEXT NOT NULL UNIQUE,
+  institution_id TEXT, kind TEXT, mapping_json TEXT NOT NULL, label TEXT,
+  uses INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Net worth once a day, everything included, so the Overall chart has a real history.
+CREATE TABLE IF NOT EXISTS networth(
+  d TEXT PRIMARY KEY, own REAL, owe REAL, net REAL, detail TEXT
+);
+
+-- The Budget tab (off unless switched on): bank statements, categories, monthly budgets.
+CREATE TABLE IF NOT EXISTS txn_categories(
+  id INTEGER PRIMARY KEY,
+  parent TEXT NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'out',            -- in | out | save | transfer
+  budget REAL,                                 -- a month, in pounds; NULL = none set
+  sort INTEGER DEFAULT 0,
+  UNIQUE(parent, name)
+);
+CREATE TABLE IF NOT EXISTS txns(
+  id INTEGER PRIMARY KEY,
+  platform_id INTEGER NOT NULL REFERENCES platforms(id) ON DELETE CASCADE,
+  posted_on TEXT NOT NULL,
+  description TEXT NOT NULL,
+  amount REAL NOT NULL,                        -- the account's currency; money in is positive
+  currency TEXT DEFAULT 'GBP',
+  balance_after REAL,
+  category_id INTEGER REFERENCES txn_categories(id) ON DELETE SET NULL,
+  category_by TEXT,                            -- you | rule | builtin
+  note TEXT,
+  fingerprint TEXT NOT NULL UNIQUE,
+  created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_txns_on ON txns(posted_on);
+CREATE TABLE IF NOT EXISTS txn_rules(
+  id INTEGER PRIMARY KEY,
+  pattern TEXT NOT NULL UNIQUE,                -- a merchant, lower-cased, matched anywhere
+  category_id INTEGER NOT NULL REFERENCES txn_categories(id) ON DELETE CASCADE,
+  created_at TEXT
+);
 """
 
 #: (table, column, definition) — applied on every start, idempotently.
 ADDED_COLUMNS: list[tuple[str, str, str]] = [
     # 0.2: a bank or savings account whose cash sits outside the investment plan
     ("platforms", "in_plan", "INTEGER NOT NULL DEFAULT 1"),
+    # 2.0: cash in rand (or anything else), and where the account is
+    ("platforms", "currency", "TEXT DEFAULT 'GBP'"),
+    ("platforms", "country", "TEXT"),
+    ("platforms", "institution", "TEXT"),        # the catalogue's id, when picked from it
+    ("platforms", "fee_year", "REAL"),           # what the platform charges, £ a year
+    # 2.0: what a holding is, for the X-Ray
+    ("instruments", "asset_class", "TEXT"),      # equity | bond | linker | cash | gold | commodity | property | crypto | mixed
+    ("instruments", "duration", "REAL"),         # a bond fund's duration, years
+    ("instruments", "ocf", "REAL"),              # a fund's yearly charge, %
 ]
 
 _init_lock = threading.Lock()

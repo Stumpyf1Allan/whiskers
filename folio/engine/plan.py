@@ -16,8 +16,10 @@ from .. import db
 from . import allocation
 from ..brokers import symbols
 
-FORMAT = 1
-KINDS = {"company_cap", "theme_cap", "ai_cap"}
+#: 2 (in 2.0) adds the watch, the retirement settings and the plan review's answers. A
+#: version 1 file — Allan's own, say — still loads exactly as it did.
+FORMAT = 2
+KINDS = {"company_cap", "theme_cap", "ai_cap", "exposure_cap"}
 
 
 class PlanError(ValueError):
@@ -193,6 +195,23 @@ def import_plan(data: dict | str | bytes) -> dict:
     corr = data.get("corrections")
     if isinstance(corr, dict) and corr.get("id") and isinstance(corr.get("holdings"), dict):
         rep["corrections"] = _apply_corrections(corr)
+    if isinstance(data.get("watch"), dict) and data["watch"].get("themes"):
+        from . import themes
+        w = data["watch"]
+        themes.set_watch(w.get("main"), list(w.get("themes") or []), w.get("why"))
+        rep["watch"] = True
+    if isinstance(data.get("retirement"), dict):
+        from . import retirement
+        try:
+            retirement.save(data["retirement"])
+            rep["retirement"] = True
+        except retirement.RetirementError as e:
+            raise PlanError(f"The retirement settings in that plan aren't right: {e}") from None
+    if isinstance(data.get("builder"), dict) and isinstance(data["builder"].get("answers"), dict):
+        st = db.get_meta("builder", {}) or {}
+        st.setdefault("answers", {}).update(data["builder"]["answers"])
+        db.set_meta("builder", st)
+        rep["answers"] = len(data["builder"]["answers"])
     rep["sorted"] = db.scalar("SELECT COUNT(DISTINCT p.instrument_id) FROM positions p JOIN instruments i "
                               "ON i.id=p.instrument_id WHERE i.sleeve_id IS NOT NULL", (), 0)
     rep["unsorted"] = db.scalar("SELECT COUNT(DISTINCT p.instrument_id) FROM positions p JOIN instruments i "
@@ -271,4 +290,19 @@ def export_plan() -> dict:
         "targets": db.get_meta("holding_targets", {}) or {},
         "playbook": db.get_meta("playbook", {}) or {},
         "plans": {r["topic"]: r["body"] for r in db.rows("SELECT topic, body FROM plans")},
+        **_v2_extras(),
     }
+
+
+def _v2_extras() -> dict:
+    out = {}
+    w = db.get_meta("watch")
+    if isinstance(w, dict) and w.get("themes"):
+        out["watch"] = {k: w.get(k) for k in ("main", "themes", "why")}
+    r = db.get_meta("retirement")
+    if isinstance(r, dict) and r:
+        out["retirement"] = r
+    b = db.get_meta("builder")
+    if isinstance(b, dict) and b.get("answers"):
+        out["builder"] = {"answers": b["answers"]}
+    return out

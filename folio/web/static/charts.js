@@ -118,34 +118,49 @@ const Charts = (() => {
   const parseT = s => Date.parse(String(s).slice(0, 10) + 'T12:00:00Z');
 
   // ---------------------------------------------------------------- line
+  // Two extras for plans that look forwards: `numericX` takes plain numbers along the
+  // bottom (years, ages) instead of dates, and `stack` piles the series on each other as
+  // bands, so a chart of pots shows what each holds and what they add up to at once.
+  // A stacked tooltip still reads each series' own figure, never the running total.
   function drawLine(el, cfg, W, H) {
     const series = (cfg.series || []).filter(s => s.points && s.points.length > 1);
     if (!series.length) {
       el.innerHTML = `<div class="muted small" style="padding:24px 4px">${esc(cfg.empty || 'No data yet.')}</div>`;
       return;
     }
+    const NX = !!cfg.numericX;
     for (const s of series) {
-      s._t = s.points.map(p => parseT(p[0]));
+      s._t = s.points.map(p => NX ? +p[0] : parseT(p[0]));
       s._v = s.points.map(p => +p[1]);
+      s._own = s._v.slice();
+    }
+    if (cfg.stack) {
+      let acc = series[0]._v.map(() => 0);
+      for (const s of series) {
+        s._base = acc.slice();
+        s._v = s._v.map((v, i) => (acc[i] || 0) + Math.max(0, v));
+        acc = s._v.slice();
+      }
     }
     const pad = { l: cfg.yAxis === false ? 6 : 58, r: 14, t: 10, b: 24 };
     let t0 = Math.min(...series.map(s => s._t[0]));
     let t1 = Math.max(...series.map(s => s._t.at(-1)));
-    if (t1 === t0) t1 = t0 + DAY;
+    if (t1 === t0) t1 = t0 + (NX ? 1 : DAY);
     let lo = Infinity, hi = -Infinity;
     for (const s of series) for (const v of s._v) { if (v < lo) lo = v; if (v > hi) hi = v; }
     for (const h of cfg.hlines || []) { lo = Math.min(lo, h.v); hi = Math.max(hi, h.v); }
-    if (cfg.zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+    if (cfg.zero || cfg.stack) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
     const span = hi - lo || Math.abs(hi) * 0.1 || 1;
     lo -= span * 0.06; hi += span * 0.06;
-    if (cfg.zero && lo < 0 && Math.min(...series.flatMap(s => s._v)) >= 0) lo = 0;
+    if ((cfg.zero || cfg.stack) && lo < 0 && Math.min(...series.flatMap(s => s._v)) >= 0) lo = 0;
     const ticks = niceTicks(lo, hi, Math.max(4, Math.round(H / 55)));
     const x = t => pad.l + (t - t0) / (t1 - t0) * (W - pad.l - pad.r);
     const y = v => pad.t + (1 - (v - lo) / (hi - lo)) * (H - pad.t - pad.b);
     const yfmt = cfg.yfmt || compact;
     let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(cfg.label || 'Chart')}">`;
+    const tOf = v => NX ? +v : parseT(v);
     for (const b of cfg.xbands || []) {
-      const a = x(Math.max(t0, parseT(b.from))), z = x(Math.min(t1, parseT(b.to)));
+      const a = x(Math.max(t0, tOf(b.from))), z = x(Math.min(t1, tOf(b.to)));
       if (z > a) svg += `<rect x="${a}" y="${pad.t}" width="${z - a}" height="${H - pad.t - pad.b}" fill="${cv(b.color)}" opacity="${b.opacity ?? .12}"/>`;
     }
     svg += '<g class="axis">';
@@ -157,9 +172,32 @@ const Charts = (() => {
       }
     }
     const nx = Math.max(2, Math.floor((W - pad.l - pad.r) / 88));
-    const step = stepFor(t1 - t0, nx);
-    for (const t of timeTicks(t0, t1, nx)) {
-      svg += `<text x="${x(t).toFixed(1)}" y="${H - 6}" text-anchor="middle">${tickLabel(t, step)}</text>`;
+    if (NX) {
+      for (const t of niceTicks(t0, t1, nx)) {
+        if (t < t0 || t > t1 || !Number.isInteger(t)) continue;
+        svg += `<text x="${x(t).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(cfg.xtick ? cfg.xtick(t) : t)}</text>`;
+      }
+    } else {
+      const step = stepFor(t1 - t0, nx);
+      for (const t of timeTicks(t0, t1, nx)) {
+        svg += `<text x="${x(t).toFixed(1)}" y="${H - 6}" text-anchor="middle">${tickLabel(t, step)}</text>`;
+      }
+    }
+    // Labels for lines close together are stepped down, so "rate ends" and "you stop
+    // work" a year apart don't print on top of each other.
+    const placed = [];
+    for (const v of (cfg.vlines || []).slice().sort((a, b) => tOf(a.at) - tOf(b.at))) {
+      const t = tOf(v.at);
+      if (t < t0 || t > t1) continue;
+      const px = x(t);
+      svg += `<line x1="${px.toFixed(1)}" x2="${px.toFixed(1)}" y1="${pad.t}" y2="${H - pad.b}" stroke="${cv(v.color) || 'currentColor'}" stroke-dasharray="${v.dash || '3 3'}" opacity="${v.opacity ?? .7}"/>`;
+      if (!v.label) continue;
+      const wide = v.label.length * 6.2 + 8;
+      let row = 0;
+      while (placed.some(q => q.row === row && Math.abs(q.x - px) < Math.max(q.w, wide))) row++;
+      placed.push({ x: px, w: wide, row });
+      const right = px + wide > W - pad.r;
+      svg += `<text x="${(right ? px - 4 : px + 4).toFixed(1)}" y="${pad.t + 11 + row * 13}" font-size="11" text-anchor="${right ? 'end' : 'start'}" fill="${cv(v.color) || 'currentColor'}">${esc(v.label)}</text>`;
     }
     svg += '</g>';
     for (const h of cfg.hlines || []) {
@@ -168,6 +206,12 @@ const Charts = (() => {
     }
     for (const s of series) {
       const d = s._t.map((t, i) => `${i ? 'L' : 'M'}${x(t).toFixed(1)},${y(s._v[i]).toFixed(1)}`).join('');
+      if (cfg.stack) {
+        const back = s._t.map((t, i) => [t, s._base[i]]).reverse()
+          .map(([t, v]) => `L${x(t).toFixed(1)},${y(v).toFixed(1)}`).join('');
+        svg += `<path d="${d}${back}Z" fill="${cv(s.color)}" opacity="${s.areaOpacity ?? .78}"/>`;
+        continue;
+      }
       if (s.area) {
         const base = y(Math.max(lo, Math.min(hi, s.areaBase ?? lo)));
         svg += `<path d="${d}L${x(s._t.at(-1)).toFixed(1)},${base}L${x(s._t[0]).toFixed(1)},${base}Z" fill="${cv(s.color)}" opacity="${s.areaOpacity ?? .1}"/>`;
@@ -187,7 +231,7 @@ const Charts = (() => {
         : `<circle cx="${cx}" cy="${cy}" r="3.5" fill="${c}"/>`;
     }
     svg += `<g class="cursor" style="display:none"><line y1="${pad.t}" y2="${H - pad.b}" stroke="currentColor" opacity=".3"/>` +
-           series.map(s => `<circle r="3.5" fill="${cv(s.color)}" stroke="${cv('var(--panel)')}" stroke-width="1.5"/>`).join('') + '</g>';
+           series.map(s => `<circle r="${cfg.stack ? 0 : 3.5}" fill="${cv(s.color)}" stroke="${cv('var(--panel)')}" stroke-width="1.5"/>`).join('') + '</g>';
     svg += `<rect class="hit" x="${pad.l}" y="0" width="${W - pad.l - pad.r}" height="${H}" fill="transparent"/></svg><div class="tip" hidden></div>`;
     el.innerHTML = svg;
 
@@ -201,15 +245,22 @@ const Charts = (() => {
       cur.style.display = '';
       line.setAttribute('x1', x(tt)); line.setAttribute('x2', x(tt));
       let rows = '';
-      series.forEach((s, j) => {
+      const order = cfg.stack ? [...series.keys()].reverse() : [...series.keys()];
+      for (const j of order) {
+        const s = series[j];
         const k = nearest(s._t, tt);
         dots[j].setAttribute('cx', x(s._t[k])); dots[j].setAttribute('cy', y(s._v[k]));
-        if (s.noTip) return;
-        const val = (s.fmt || fmt)(s._v[k], s);
+        if (s.noTip) continue;
+        const val = (s.fmt || fmt)(s._own[k], s);
         rows += `<div><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${cv(s.color)};margin-right:6px"></i>${esc(s.name || '')} <b${cfg.money && !s.notMoney ? ' class="pv"' : ''}>${esc(val)}</b></div>`;
-      });
-      const mk = markerDays.get(main.points[i][0].slice(0, 10));
-      tip.innerHTML = `<div class="muted">${longDate(tt)}</div>${rows}${mk ? `<div>${esc(mk)}</div>` : ''}`;
+      }
+      if (cfg.stack && cfg.totalLabel) {
+        const k = nearest(series.at(-1)._t, tt);
+        rows += `<div style="margin-top:2px">${esc(cfg.totalLabel)} <b${cfg.money ? ' class="pv"' : ''}>${esc(fmt(series.at(-1)._v[k]))}</b></div>`;
+      }
+      const mk = NX ? null : markerDays.get(String(main.points[i][0]).slice(0, 10));
+      const head = NX ? (cfg.xtip ? cfg.xtip(tt) : String(tt)) : longDate(tt);
+      tip.innerHTML = `<div class="muted">${esc(head)}</div>${rows}${mk ? `<div>${esc(mk)}</div>` : ''}${cfg.tipExtra ? cfg.tipExtra(tt) : ''}`;
       tip.hidden = false;
       const left = x(tt) + 14 + tip.offsetWidth > W ? x(tt) - tip.offsetWidth - 14 : x(tt) + 14;
       tip.style.left = `${Math.max(0, left)}px`;
@@ -220,11 +271,16 @@ const Charts = (() => {
   }
 
   // ---------------------------------------------------------------- bars
+  // Items may carry `parts` ([{name, value, color}]) to stack, and the chart may carry an
+  // `overlay` ([{name, values, color}]): a line across the bars, for spending against the
+  // income that pays for it.
   function drawBars(el, cfg, W, H) {
     const items = cfg.items || [];
     if (!items.length) { el.innerHTML = `<div class="muted small" style="padding:24px 4px">${esc(cfg.empty || 'Nothing yet.')}</div>`; return; }
+    for (const it of items) if (it.parts) it.value = it.parts.reduce((a, p) => a + Math.max(0, p.value || 0), 0);
     const pad = { l: 52, r: 10, t: 10, b: 26 };
-    let hi = Math.max(0, ...items.map(i => i.value), ...(cfg.hlines || []).map(h => h.v));
+    const over = (cfg.overlay || []).flatMap(o => o.values.filter(v => v !== null && v !== undefined));
+    let hi = Math.max(0, ...items.map(i => i.value), ...(cfg.hlines || []).map(h => h.v), ...over);
     hi = hi || 1;
     const ticks = niceTicks(0, hi * 1.08, Math.max(3, Math.round(H / 58)));
     const top = Math.max(ticks.at(-1), hi);
@@ -244,9 +300,24 @@ const Charts = (() => {
     });
     svg += '</g>';
     items.forEach((it, i) => {
+      if (it.parts) {
+        let base = 0;
+        for (const p of it.parts) {
+          const v = Math.max(0, p.value || 0);
+          if (!v) continue;
+          const h = Math.max(0, y(base) - y(base + v));
+          svg += `<rect x="${pad.l + iw * i + (iw - bw) / 2}" y="${y(base + v)}" width="${bw}" height="${h}" fill="${cv(p.color)}"/>`;
+          base += v;
+        }
+        return;
+      }
       const h = Math.max(0, y(0) - y(it.value));
       svg += `<rect x="${pad.l + iw * i + (iw - bw) / 2}" y="${y(0) - h}" width="${bw}" height="${h}" rx="2" fill="${cv(it.color || cfg.color || 'var(--accent)')}"/>`;
     });
+    for (const o of cfg.overlay || []) {
+      const d = o.values.map((v, i) => v === null || v === undefined ? '' : `${i && o.values[i - 1] !== null && o.values[i - 1] !== undefined ? 'L' : 'M'}${(pad.l + iw * i + iw / 2).toFixed(1)},${y(v).toFixed(1)}`).join('');
+      svg += `<path d="${d}" fill="none" stroke="${cv(o.color || 'var(--ink)')}" stroke-width="${o.width || 2}"${o.dash ? ` stroke-dasharray="${o.dash}"` : ''} stroke-linejoin="round"/>`;
+    }
     for (const h of cfg.hlines || []) {
       svg += `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(h.v)}" y2="${y(h.v)}" stroke="${cv(h.color) || 'currentColor'}" stroke-dasharray="4 4"/>`;
       if (h.label) svg += `<text x="${W - pad.r}" y="${y(h.v) - 5}" text-anchor="end" font-size="11" fill="${cv(h.color) || 'currentColor'}">${esc(h.label)}</text>`;
@@ -259,7 +330,11 @@ const Charts = (() => {
       const px = ev.clientX - el.getBoundingClientRect().left;
       const i = Math.max(0, Math.min(items.length - 1, Math.floor((px - pad.l) / iw)));
       const it = items[i];
-      tip.innerHTML = `<div class="muted">${esc(it.long || it.label)}</div><b${cfg.money ? ' class="pv"' : ''}>${esc(fmt(it.value))}</b>${it.note ? `<div>${esc(it.note)}</div>` : ''}`;
+      const pv = cfg.money ? ' class="pv"' : '';
+      const dot = c => `<i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${cv(c)};margin-right:6px"></i>`;
+      const parts = it.parts ? it.parts.filter(p => p.value).slice().reverse().map(p => `<div>${dot(p.color)}${esc(p.name)} <b${pv}>${esc(fmt(p.value))}</b></div>`).join('') : '';
+      const lines = (cfg.overlay || []).map(o => o.values[i] === null || o.values[i] === undefined ? '' : `<div>${dot(o.color || 'var(--ink)')}${esc(o.name)} <b${pv}>${esc(fmt(o.values[i]))}</b></div>`).join('');
+      tip.innerHTML = `<div class="muted">${esc(it.long || it.label)}</div>${it.parts ? parts : `<b${pv}>${esc(fmt(it.value))}</b>`}${lines}${it.note ? `<div>${esc(it.note)}</div>` : ''}`;
       tip.hidden = false;
       const cx = pad.l + iw * i + iw / 2;
       tip.style.left = `${Math.max(0, cx + 12 + tip.offsetWidth > W ? cx - tip.offsetWidth - 12 : cx + 12)}px`;

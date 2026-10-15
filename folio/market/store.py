@@ -234,7 +234,12 @@ def prune(wanted: list[str]) -> int:
 
 
 def wanted_keys() -> list[str]:
-    keys = [ref_key(k) for k in catalogue.REFERENCE]
+    keys = [ref_key(k) for k in catalogue.always()]
+    try:
+        from ..engine import themes
+        keys += [ref_key(k) for k in themes.series_needed()]
+    except Exception as e:                      # never let the watch stop prices updating
+        db.log("themes.series", str(e))
     ccys = set()
     for r in db.rows("SELECT DISTINCT i.market_symbol, sm.currency FROM positions p "
                      "JOIN instruments i ON i.id=p.instrument_id "
@@ -246,6 +251,13 @@ def wanted_keys() -> list[str]:
     for r in db.rows("SELECT DISTINCT currency FROM instruments WHERE currency IS NOT NULL"):
         major = config.MINOR_UNIT_CURRENCIES.get(r["currency"], (r["currency"],))[0]
         ccys.add(major)
+    # Cash, pensions and anything else owned in another currency (rand, mostly).
+    for table in ("platforms", "pensions", "assets", "mortgages"):
+        try:
+            for r in db.rows(f"SELECT DISTINCT currency FROM {table} WHERE currency IS NOT NULL"):  # nosec B608  # fixed table names
+                ccys.add(str(r["currency"]).upper())
+        except Exception:  # nosec B112  # an older database without the column: nothing to add
+            continue
     ccys |= {"USD", "EUR"}
     keys += [fx_key(c) for c in sorted(ccys) if c and c != "GBP"]
     return list(dict.fromkeys(keys))
@@ -302,6 +314,11 @@ def start_refresh(force: bool = False, before=None) -> bool:
                 portfolio.take_snapshot()
             except Exception as e:
                 db.log("snapshot.error", str(e))
+            try:
+                from ..engine import overall
+                overall.take_snapshot()
+            except Exception as e:
+                db.log("networth.error", str(e))
             try:
                 from .. import sync
                 sync.after_change()          # the PC: the phone's copy gets these figures too

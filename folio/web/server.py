@@ -22,10 +22,10 @@ import unicodedata
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .. import android, config, db, net, security, sync, updates
+from .. import android, config, db, inbox, net, security, sync, updates
 from ..brokers import freetrade, monzo, symbols, trading212
 from ..engine import (allocation, export, isa, mathx, narrative, plan, planbuilder, playbook, portfolio,
-                      rules, sample, signals, stress)
+                      rules, sample, signals, stress, themes)
 from ..market import catalogue, sources, store
 
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
@@ -90,7 +90,11 @@ def api_bootstrap(req, m, q, body):
                 "android": config.android()},
         "settings": {k: s.get(k) for k in ("user_name", "toured", "help_email", "isa_allowance",
                                            "fscs_limit", "refresh_on_open", "theme",
-                                           "hide_amounts")},
+                                           "hide_amounts", "show_mortgage", "show_retirement",
+                                           "budget_on")},
+        "watch": {k: v for k, v in themes.watch().items() if k in ("main", "themes", "legacy")}
+                 | {"title": themes.title(themes.watch()["main"])},
+        "vault": security.storage_backend(),
         "platforms": db.scalar("SELECT COUNT(*) FROM platforms", (), 0),
         "holdings": db.scalar("SELECT COUNT(*) FROM positions", (), 0),
         "sleeves": db.scalar("SELECT COUNT(*) FROM sleeves", (), 0),
@@ -117,6 +121,14 @@ def _everything():
     return pos, tot, alloc, exp, market, warns, back, pb, ht
 
 
+def _main_exposure(pos, tot, market, exp) -> dict:
+    main = (market.get("watch") or {}).get("main") or "ai"
+    if main == "ai":
+        return {"theme": "ai", "pct": exp["ai_pct"], "value": exp["ai_value"], "unknown": len(exp["unknown"])}
+    e = themes.exposure(pos, tot, main)
+    return {"theme": main, "pct": e["pct"], "value": e["value"], "unknown": len(e["unknown"])}
+
+
 @route("GET", "/api/overview")
 def api_overview(req, m, q, body):
     pos, tot, alloc, exp, market, warns, back, pb, ht = _everything()
@@ -129,13 +141,17 @@ def api_overview(req, m, q, body):
                        "in_band": alloc["in_band"], "waffle": allocation.waffle(alloc)},
         "exposure": {"ai_pct": exp["ai_pct"], "ai_value": exp["ai_value"],
                      "unknown": len(exp["unknown"])},
-        "market": {k: market[k] for k in ("regime", "label", "text", "gauge", "have", "of", "groups")}
+        "watch_exposure": _main_exposure(pos, tot, market, exp),
+        "market": {k: market[k] for k in ("regime", "label", "text", "gauge", "have", "of", "groups", "watch")}
                   | {"lights": [{k: x.get(k) for k in ("key", "title", "level", "words", "group", "since",
                                                         "direction")} for x in market["lights"]]},
         "big_picture": narrative.big_picture(market, pb, exp, alloc, tot),
         "isa": isa.allowance(),
         "playbook": {"firing": pb["firing"], "of": pb["of"], "known": pb["known"], "tier": pb["tier"],
                      "ai_firing": sum(1 for r in pb["signals"] if r["group"] == "ai" and r["firing"]),
+                     "main_firing": sum(1 for r in pb["signals"] if r["group"] == (market.get("watch") or {}).get("main")
+                                        and r["firing"]),
+                     "main_of": sum(1 for r in pb["signals"] if r["group"] == (market.get("watch") or {}).get("main")),
                      "drop": pb["ladder"]["drop"]},
         "history": {"points": [[d, v] for d, v in mathx.thin(back["points"], 520)],
                     "coverage": back["coverage"], "missing": back["missing"],
@@ -196,7 +212,8 @@ def api_holding(req, m, q, body):
     }
 
 
-INSTRUMENT_FIELDS = {"sleeve_id", "ai_share", "market_symbol", "company", "theme", "notes", "name"}
+INSTRUMENT_FIELDS = {"sleeve_id", "ai_share", "market_symbol", "company", "theme", "notes", "name",
+                     "asset_class", "ocf", "duration"}
 
 
 @route("PATCH", "/api/instrument/{iid}")
@@ -205,6 +222,16 @@ def api_patch_instrument(req, m, q, body):
     changes = {k: v for k, v in (body or {}).items() if k in INSTRUMENT_FIELDS}
     if "ai_share" in changes:
         changes["ai_share"] = _float(changes["ai_share"], "The AI share", 0, 100, allow_none=True)
+    if "ocf" in changes:
+        changes["ocf"] = _float(changes["ocf"], "The yearly charge", 0, 5, allow_none=True)
+    if "duration" in changes:
+        changes["duration"] = _float(changes["duration"], "The duration", 0, 40, allow_none=True)
+    if "asset_class" in changes and changes["asset_class"] not in (None, ""):
+        from ..engine import classify
+        if changes["asset_class"] not in classify.ASSET_CLASSES:
+            raise ApiError("Unknown kind of investment.")
+    elif "asset_class" in changes:
+        changes["asset_class"] = None
     if "sleeve_id" in changes and changes["sleeve_id"] not in (None, ""):
         changes["sleeve_id"] = _int(changes["sleeve_id"], "sleeve")
         if not db.one("SELECT 1 FROM sleeves WHERE id=?", (changes["sleeve_id"],)):
@@ -355,11 +382,28 @@ def api_ai(req, m, q, body):
     pos, tot, alloc, exp, market, warns, back, pb, ht = _everything()
     plans = {r["topic"]: r for r in db.rows("SELECT * FROM plans")}
     cap = db.one("SELECT * FROM rules WHERE kind='ai_cap' AND enabled=1")
+    w = market.get("watch") or {}
+    theme_exp = {}
+    for t in w.get("themes") or []:
+        if t != "ai":
+            e = themes.exposure(pos, tot, t)
+            theme_exp[t] = {k: e[k] for k in ("value", "pct", "unknown_value", "coverage")} | {
+                "top": e["top"][:8], "unknown": e["unknown"][:8], "title": themes.title(t),
+                "label": themes.label(t)}
+    replays = []
+    for t in w.get("themes") or []:
+        ref = (themes.LIBRARY.get(t) or {}).get("scenario_ref")
+        val = exp["ai_value"] if t == "ai" else (theme_exp.get(t) or {}).get("value") or 0.0
+        rp = stress.replay(t, val, tot.get("invested") or 0.0, ref)
+        if rp:
+            replays.append(rp | {"title": themes.title(t)})
     return {"exposure": exp, "totals": {k: tot[k] for k in ("total", "cash", "invested")},
             "market": market, "context": signals.context(), "plans": plans,
             "dotcom": stress.DOTCOM, "worst": back.get("worst"), "playbook": pb,
             "narratives": narrative.watch(market, pb),
-            "coverage": back["coverage"], "cap": cap}
+            "coverage": back["coverage"], "cap": cap, "theme_exposure": theme_exp,
+            "replays": replays, "standard": stress.standard(pos, tot),
+            "library": [{"key": k, "label": v["label"], "about": v["about"]} for k, v in themes.LIBRARY.items()]}
 
 
 @route("PUT", "/api/signals/{key}")
@@ -493,7 +537,8 @@ def api_settings(req, m, q, body):
 
 SETTABLE = {"user_name", "isa_allowance", "fscs_limit", "refresh_on_open", "stooq_key",
             "check_for_updates", "auto_download_updates", "update_url", "toured", "theme",
-            "hide_amounts"}
+            "hide_amounts", "show_mortgage", "show_retirement", "budget_on", "reminder_day",
+            "reminder_on", "statements_folder"}
 
 
 @route("PATCH", "/api/settings")
@@ -511,8 +556,16 @@ def api_patch_settings(req, m, q, body):
         incoming["user_name"] = str(incoming["user_name"] or "").strip()[:60]
     if "theme" in incoming and incoming["theme"] not in ("clock", "system", "light", "dark"):
         raise ApiError("Unknown theme.")
-    if "hide_amounts" in incoming:
-        incoming["hide_amounts"] = bool(incoming["hide_amounts"])
+    for k in ("hide_amounts", "show_mortgage", "show_retirement", "budget_on", "reminder_on"):
+        if k in incoming:
+            incoming[k] = bool(incoming[k])
+    if "reminder_day" in incoming:
+        incoming["reminder_day"] = int(_float(incoming["reminder_day"], "The reminder day", 1, 31))
+    if "statements_folder" in incoming:
+        folder = str(incoming["statements_folder"] or "").strip()
+        if folder and not pathlib.Path(folder).expanduser().is_absolute():
+            raise ApiError("Choose a whole folder path, for example C:\\Users\\you\\Documents\\Statements.")
+        incoming["statements_folder"] = folder
     if "stooq_key" in incoming:
         incoming["stooq_key"] = re.sub(r"[^A-Za-z0-9]", "", str(incoming["stooq_key"] or ""))[:80]
     config.settings.update(incoming)
@@ -542,13 +595,19 @@ def api_add_platform(req, m, q, body):
     if provider == "card":
         owed = _float(b.get("owed"), "What you owe", 0, 10_000_000, allow_none=True)
         cash = -owed if owed is not None else None
+    ccy = str(b.get("currency") or "GBP").upper()[:3]
+    if not re.fullmatch(r"[A-Z]{3}", ccy):
+        raise ApiError("That currency isn't valid.")
+    country = str(b.get("country") or "").upper()[:2] or None
     with db.tx() as c:
         cur = c.execute("INSERT INTO platforms(name,provider,wrapper,flexible,limit_gbp,in_plan,cash,"
-                        "cash_as_of,cash_source,sort) VALUES(?,?,?,?,?,?,?,?,?,"
-                        "(SELECT COALESCE(MAX(sort),0)+1 FROM platforms))",
+                        "cash_as_of,cash_source,currency,country,institution,fee_year,sort) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(sort),0)+1 FROM platforms))",
                         (name, provider, wrapper, flexible,
                          _float(b.get("limit"), "The limit", 0, allow_none=True), in_plan, cash,
-                         db.now() if cash is not None else None, "manual" if cash is not None else None))
+                         db.now() if cash is not None else None, "manual" if cash is not None else None,
+                         ccy, country, (str(b.get("institution") or "")[:80] or None),
+                         _float(b.get("fee_year"), "The platform fee", 0, 100000, allow_none=True)))
     return {"ok": True, "id": cur.lastrowid}
 
 
@@ -570,6 +629,13 @@ def api_patch_platform(req, m, q, body):
         sets.append("wrapper=?"), vals.append(b["wrapper"])
     if "limit" in b:
         sets.append("limit_gbp=?"), vals.append(_float(b["limit"], "The limit", 0, allow_none=True))
+    if "fee_year" in b:
+        sets.append("fee_year=?"), vals.append(_float(b["fee_year"], "The platform fee", 0, 100000, allow_none=True))
+    if "currency" in b:
+        ccy = str(b["currency"] or "GBP").upper()[:3]
+        if not re.fullmatch(r"[A-Z]{3}", ccy):
+            raise ApiError("That currency isn't valid.")
+        sets.append("currency=?"), vals.append(ccy)
     if "owed" in b:                     # a credit card: what is owed, kept as a negative balance
         owed = _float(b["owed"], "What you owe", 0, 10_000_000, allow_none=True)
         b = dict(b, cash=(-owed if owed is not None else None))
@@ -641,6 +707,7 @@ def api_import(req, m, q, body):
     except freetrade.NotFreetrade as e:
         raise ApiError(str(e)) from None
     rep["cash_estimate"] = freetrade.cash_estimate(pid)
+    db.set_meta("last_import", db.now())         # this month's reminder is done
     store.start_refresh()
     return rep
 
@@ -811,6 +878,14 @@ def api_sample_remove(req, m, q, body):
 # ============================================================================ refreshing
 
 def _sync_brokers():
+    if sync.role() != "phone":
+        store.JOB.update(current="Your statements folder")
+        try:
+            got = inbox.import_waiting()
+            for left in got["left"]:
+                store.JOB["errors"].append({"key": left["file"], "message": left["why"]})
+        except Exception as e:
+            store.JOB["errors"].append({"key": "Statements folder", "message": str(e)})
     if sync.role() == "phone":       # the PC's copy first, so the brokers update on top of it
         store.JOB.update(current="Your PC's copy")
         try:
@@ -993,6 +1068,7 @@ def api_sync_stop(req, m, q, body):
 
 #: Requests that change nothing the phone's copy holds, or that look after it themselves.
 _NOT_A_CHANGE = ("/api/sync", "/api/update", "/api/refresh", "/api/open-", "/api/check-symbol",
+                 "/api/retirement/what-if", "/api/import/analyse", "/api/inbox/open",
                  "/api/plan/build", "/api/allocation/new-money")
 
 
@@ -1158,6 +1234,8 @@ class Handler(BaseHTTPRequestHandler):
             ctype = "text/javascript"
         elif target.suffix == ".svg":
             ctype = "image/svg+xml"
+        elif target.suffix == ".webp":          # not in every Windows registry's list
+            ctype = "image/webp"
         elif target.suffix == ".webmanifest":
             ctype = "application/manifest+json"
         self._send(200, target.read_bytes(), (ctype or "application/octet-stream") +
@@ -1208,3 +1286,8 @@ def serve(port: int | None = None, block: bool = True):
         return httpd, port
     threading.Thread(target=httpd.serve_forever, daemon=True, name="http").start()
     return httpd, port
+
+
+# The 2.0 screens (Overall, Mortgage, Retirement, the plan review, importing) live in their
+# own module; importing it registers their routes on this server.
+from . import routes2  # noqa: E402,F401

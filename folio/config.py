@@ -23,8 +23,8 @@ APP_NAME = "Whiskers"
 #: separator in batch files, and the next name might not be one plain word.
 APP_FILE_NAME = "Whiskers"
 APP_SLUG = "whiskers"
-APP_VERSION = "1.0.1"
-APP_TAGLINE = "Investment tracker"
+APP_VERSION = "2.0.0"
+APP_TAGLINE = "Investments, mortgage and retirement"
 
 #: Where every copy looks for new versions: the latest GitHub release of the repository.
 #: Filled in before the repository exists, deliberately (the Mittens & Pence lesson): a
@@ -78,6 +78,16 @@ DEFAULTS = {
     #: "system" follows the computer; "light" and "dark" are fixed.
     "theme": "clock",
     "hide_amounts": False,
+    # 2.0: the tabs. Overall and Investments are always there; the rest can be switched off,
+    # and the Budget is off until somebody wants it (and only then counts on Overall).
+    "show_mortgage": True,
+    "show_retirement": True,
+    "budget_on": False,
+    # The statements folder (in Documents unless chosen) and the monthly reminder to fill it.
+    "statements_folder": "",
+    "reminder_day": 1,
+    "reminder_on": True,
+    "reminder_dismissed": "",
 }
 
 
