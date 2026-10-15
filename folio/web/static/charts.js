@@ -293,8 +293,13 @@ const Charts = (() => {
     for (const v of ticks) {
       svg += `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${pad.l - 8}" y="${y(v) + 4}" text-anchor="end"${cfg.money ? ' class="ymoney"' : ''}>${esc(yfmt(v))}</text>`;
     }
+    // The last bar is always labelled; when it falls just after a regular label, that one
+    // gives way, so "2038" and "2039" never print on top of each other.
+    const last = items.length - 1, gap = last % every;
+    const width = i => String(items[i].label).length * 6.5;
+    const crowded = gap > 0 && gap * iw < (width(last - gap) + width(last)) / 2 + 6;
     items.forEach((it, i) => {
-      if (i % every === 0 || i === items.length - 1) {
+      if ((i % every === 0 && !(crowded && i === last - gap)) || i === last) {
         svg += `<text x="${pad.l + iw * i + iw / 2}" y="${H - 7}" text-anchor="middle">${esc(it.label)}</text>`;
       }
     });

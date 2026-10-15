@@ -139,7 +139,8 @@ def _regime_since(market: dict) -> str:
     i = len(strip) - 1
     while i > 0 and strip[i - 1][1] == strip[-1][1]:
         i -= 1
-    return f" The lights have read like this since {strip[i][0]}."
+    from .narrative import _day
+    return f" The lights have read like this since {_day(strip[i][0])}."
 
 
 def evaluate(pos: list[dict], totals: dict, alloc: dict, exp: dict | None = None,
@@ -239,9 +240,10 @@ def evaluate(pos: list[dict], totals: dict, alloc: dict, exp: dict | None = None
     econ = [x for x in (market or {}).get("lights", []) if x.get("group") == "economy"
             and x["level"] in ("amber", "red")]
     if econ and any(x["level"] == "red" for x in econ):
+        from .narrative import _day
         out.append({"id": "economy", "level": "amber", "kind": "market",
                     "title": "The economy: " + ", ".join(
-                        f"{x['title'].lower()} {x['level']} since {x['since']}" for x in econ),
+                        f"{x['title'].lower()} {x['level']} since {_day(x['since'])}" for x in econ),
                     "detail": "Slow gauges of a downturn building. They describe the economy, not "
                               "prices, and have given false alarms as well as true ones.", "go": "ai"})
 

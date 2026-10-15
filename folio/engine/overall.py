@@ -211,7 +211,7 @@ def summary() -> dict:
             if d is not None:
                 lines.append(f"Fixed rate ends in {d} days" if d >= 0 else f"Fixed rate ended {-d} days ago")
             if m.get("payoff_on"):
-                lines.append(f"Clear by {m['payoff_on'][:7]}")
+                lines.append("Clear by " + dt.date.fromisoformat(m["payoff_on"][:7] + "-01").strftime("%B %Y"))
             if m.get("ltv") is not None:
                 lines.append(f"{m['ltv'] * 100:.0f}% loan to value")
             tiles.append({"key": "mortgage", "title": "Mortgage", "go": "mortgage", "level": lvl,

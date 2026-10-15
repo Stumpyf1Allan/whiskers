@@ -309,7 +309,8 @@ ACTS['plan-apply'] = async b => {
   if (!await confirmBox('Use these parts of the plan?', `${choice.sleeves ? 'Your sleeves and targets are replaced; holdings in sleeves with other names go back to “not in a sleeve yet”. ' : ''}Nothing on any platform changes. You can run the review again at any time.`, 'Use them')) return;
   await busy(b, async () => {
     const r = await api('/api/builder/apply', { method: 'POST', body: choice });
-    toast(`Done: ${r.done.join(', ')}. ${choice.sleeves ? 'Sort holdings into the sleeves on the Allocation screen.' : ''}`);
+    const next = !choice.sleeves ? '' : (r.sorted || []).length ? 'Check them, and sort anything left, on the Allocation screen.' : 'Sort holdings into the sleeves on the Allocation screen.';
+    toast(`Done: ${r.done.join(', ')}. ${next}`);
     await refreshBoot();
     render();
   });

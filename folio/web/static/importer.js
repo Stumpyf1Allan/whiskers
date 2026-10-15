@@ -25,7 +25,9 @@ async function vImport(el) {
     </section>
 
     <div class="grid g2">
-      <section class="panel"><h2>Your statements folder</h2>
+      ${onAndroid() ? `<section class="panel"><h2>Your statements folder</h2>
+        <p class="lede">The statements folder works on a computer. On the phone, tap the box above and choose the file from Downloads or Drive. If this phone follows a computer’s copy, import on the computer instead: the phone picks it up the next time it opens.</p>
+      </section>` : `<section class="panel"><h2>Your statements folder</h2>
         <p class="lede">Put each month’s downloads in this folder and press Refresh. Whatever Whiskers recognises goes in, and the file moves into “Filed”. Anything it can’t place stays put and is listed here. Nothing is ever deleted.</p>
         <dl class="kv"><dt>Folder</dt><dd class="small">${esc(inbox.folder)}${inbox.chosen ? '' : ' <span class="muted">(the usual place)</span>'}</dd>
           <dt>Waiting</dt><dd>${inbox.waiting.length ? inbox.waiting.map(f => `<div class="small">${esc(f)}</div>`).join('') : '<span class="muted">Nothing</span>'}</dd>
@@ -34,7 +36,7 @@ async function vImport(el) {
         ${last && last.done.length ? `<div class="stack" style="gap:4px;margin-top:10px">${last.done.map(x => `<div class="small"><span class="up">✓</span> ${esc(x.file)} → ${esc(x.platform)}</div>`).join('')}</div>` : ''}
         <div class="row wrap" style="margin-top:12px">${onAndroid() ? '' : '<button class="btn" data-act="inbox-open">Open the folder</button>'}<button class="btn" data-act="inbox-read">Read it now</button><button class="btn ghost" data-act="inbox-change">Use a different folder</button></div>
         <p class="note" style="margin-top:8px">Leave each platform’s own filename alone if you can: it usually names the platform, which is how Whiskers knows where the file belongs.</p>
-      </section>
+      </section>`}
       <section class="panel"><h2>A monthly reminder</h2>
         <p class="lede">A strip across the top of Whiskers on the day you choose, until that month’s files are in. Your own calendar can remind you too, wherever you are.</p>
         <div class="row wrap" style="align-items:flex-end">
