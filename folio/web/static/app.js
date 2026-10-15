@@ -321,6 +321,11 @@ async function cycleTheme() {
   if (applyTheme()) render();
   api('/api/settings', { method: 'PATCH', body: { theme: next } }).catch(() => {});
 }
+// Larger text for anyone who wants it (Settings): rem sizes follow the root, and the body's
+// own size is set alongside in styles.css. Charts keep their size.
+function applyText() {
+  document.documentElement.dataset.text = (S.boot && S.boot.settings && S.boot.settings.text_size) || 'normal';
+}
 function applyHide() {
   const on = !!S.boot.settings.hide_amounts;
   document.documentElement.classList.toggle('hide', on);
@@ -676,7 +681,7 @@ ACTS['sample-load'] = async btn => {
 };
 ACTS['add-platform'] = btn => addPlatform(btn.dataset.kind);
 
-async function refreshBoot() { S.boot = await api('/api/bootstrap'); }
+async function refreshBoot() { S.boot = await api('/api/bootstrap'); applyText(); }
 
 // ============================================================================ Holdings
 
@@ -1355,7 +1360,7 @@ async function vMarkets(el) {
       }).join('')}</div></section>`;
     }).join('')}
     ${val ? valuationsPanel(val) : ''}
-    <p class="note">Prices come from Yahoo Finance\u2019s public charts and the Federal Reserve Bank of St. Louis (FRED). They can be delayed, and Yahoo\u2019s service is unofficial, so a figure here can occasionally be missing or late.</p>
+    <p class="note">Prices come from Yahoo Finance\u2019s public charts, the Federal Reserve Bank of St. Louis (FRED) and, for UK consumer prices, the Office for National Statistics. They can be delayed, and Yahoo\u2019s service is unofficial, so a figure here can occasionally be missing or late.</p>
   </div>`;
 }
 // Valuations with no free daily feed, typed in by hand with their dates (engine/valuations.py).
@@ -1447,6 +1452,10 @@ async function vSettings(el) {
         <label><input type="checkbox" data-act="tab-toggle" data-key="show_retirement" ${s.show_retirement ? 'checked' : ''}><span><b>Retirement</b><br><span class="small muted">Your pensions, the State Pension, and a year-by-year plan to the end of retirement.</span></span></label>
         <label><input type="checkbox" data-act="tab-toggle" data-key="budget_on" ${s.budget_on ? 'checked' : ''}><span><b>Budget</b><br><span class="small muted">Bank statements, spending by category and monthly budgets. Off unless you want it; only counted on Overall when it is on.</span></span></label>
       </div>
+    </section>
+    <section class="panel"><h2>Text size</h2>
+      <p class="lede">Larger text is easier to read; charts keep their size. On a computer, Ctrl and + also zooms the whole window.</p>
+      <div class="row wrap" role="radiogroup" aria-label="Text size">${[['normal', 'Normal'], ['larger', 'Larger'], ['largest', 'Largest']].map(([k, l]) => `<label class="row small"><input type="radio" name="text-size" data-act="text-size" value="${k}" ${(s.text_size || 'normal') === k ? 'checked' : ''}> ${l}</label>`).join('')}</div>
     </section>
     ${extra('top')}
     <section class="panel"><div class="spread"><h2>Platforms</h2><div class="row wrap"><button class="btn primary" data-act="add-from-catalogue">Find your platform or account</button><button class="btn" data-act="add-platform" data-kind="trading212">Add Trading 212</button><button class="btn" data-act="add-platform" data-kind="freetrade">Add Freetrade</button><button class="btn ghost" data-act="add-platform" data-kind="other">Type one in</button></div></div>
@@ -1728,6 +1737,12 @@ ACTS['export-phone'] = async b => {
     toast(said || 'Downloaded. Put it somewhere private your phone can open, such as your own iCloud Drive, and tap it there.');
   });
 };
+ACTS['text-size'] = async b => {
+  S.boot.settings.text_size = b.value;
+  applyText();
+  try { await api('/api/settings', { method: 'PATCH', body: { text_size: b.value } }); } catch (e) { toast(e.message, true); }
+  render();
+};
 ACTS['limits-save'] = async b => {
   await busy(b, async () => {
     await api('/api/settings', { method: 'PATCH', body: { isa_allowance: $('#set-isa').value, fscs_limit: $('#set-fscs').value, user_name: $('#set-name').value } });
@@ -1876,6 +1891,7 @@ async function boot() {
   try { S.boot = await api('/api/bootstrap'); }
   catch (e) { $('#boot').innerHTML = `<div class="panel" style="max-width:480px"><h2>Whiskers couldn\u2019t start</h2><p class="lede">${esc(e.message)}</p></div>`; return; }
   applyTheme();
+  applyText();
   applyHide();
   buildNav();
   $('#fake-banner').hidden = !S.boot.app.fake_market;

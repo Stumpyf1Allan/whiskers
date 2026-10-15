@@ -48,10 +48,36 @@ platform, which is how {app} knows where the file belongs.
 """
 
 
+#: Windows' own name for the Documents folder (KNOWNFOLDERID FOLDERID_Documents).
+_FOLDERID_DOCUMENTS = "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}"
+
+
+def _windows_documents() -> pathlib.Path | None:
+    """The Documents folder File Explorer shows. On many Windows PCs OneDrive has moved it
+    to OneDrive\\Documents and left an empty C:\\Users\\name\\Documents behind, so the path
+    is asked of Windows rather than guessed: a folder made in the empty one is one nobody
+    would find."""
+    if not sys.platform.startswith("win"):
+        return None
+    try:
+        import ctypes
+        import uuid
+        guid = (ctypes.c_byte * 16).from_buffer_copy(uuid.UUID(_FOLDERID_DOCUMENTS).bytes_le)
+        out = ctypes.c_wchar_p()
+        if ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(out)) != 0:
+            return None
+        try:
+            return pathlib.Path(out.value) if out.value else None
+        finally:
+            ctypes.windll.ole32.CoTaskMemFree(out)
+    except Exception:
+        return None
+
+
 def _documents() -> pathlib.Path | None:
     home = pathlib.Path.home()
-    for cand in (home / "Documents", home / "OneDrive" / "Documents", home):
-        if cand.exists():
+    for cand in (_windows_documents(), home / "Documents", home / "OneDrive" / "Documents", home):
+        if cand is not None and cand.is_dir():
             return cand
     return None
 

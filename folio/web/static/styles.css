@@ -395,8 +395,10 @@ hr.soft { border: 0; border-top: 1px solid var(--line-2); margin: 6px 0; }
   .view { padding: 4px 10px 24px; }
   .banner { padding: 8px 12px; }
   .panel { padding: 14px; }
-  .figures .v { font-size: 1.4rem; }
-  .figures .hero .v { font-size: 1.7rem; }
+  /* capped by the screen's width too, so larger text never cuts a figure short */
+  .figures > div { padding: 12px 12px; }
+  .figures .v { font-size: min(1.4rem, 6vw); }
+  .figures .hero .v { font-size: min(1.7rem, 7vw); }
   .monitor { padding: 16px 14px; }
   .modal { padding: 0; }
   .modal-card, .modal-card.wide { max-height: 100vh; border-radius: 0; }
@@ -671,3 +673,9 @@ input[type=date] { border: 1px solid var(--line); background: var(--panel); bord
 .gloss { padding: 10px 0; border-bottom: 1px solid var(--line-2); display: grid; gap: 3px; }
 .gloss:last-child { border-bottom: 0; }
 .moved { margin-top: 8px; color: var(--mon-muted); }
+
+/* Text size (Settings): every rem follows the root; the body's own 14px is scaled alongside. */
+html[data-text="larger"] { font-size: 112.5%; }
+html[data-text="larger"] body { font-size: 15.75px; }
+html[data-text="largest"] { font-size: 125%; }
+html[data-text="largest"] body { font-size: 17.5px; }

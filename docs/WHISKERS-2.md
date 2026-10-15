@@ -12,14 +12,16 @@ It is still a tool for keeping to your own plan. It is not financial advice.
 | Tab | What it holds |
 |---|---|
 | **Overall** | Net worth (what you own less what you owe), a health tile for each tab, the big picture in plain English, the dates coming up in the next year, and the **plan review**. |
-| **Investments** | Everything 1.x had: Summary, Holdings, Allocation, Market watch, Markets, Activity, plus **Import** (drop a file, the statements folder, the monthly reminder). |
+| **Investments** | Everything 1.x had: Summary, Holdings, Allocation, Market watch, Markets, Activity, plus **Import** (drop a file, the statements folder, the monthly reminder). Markets adds **Valuations, typed in by hand** (CAPE, forward P/Es, Damodaran's implied equity risk premium), each with its date and marked old after three months. |
 | **Budget** | Off unless switched on in Settings. Bank statements, spending by category, monthly budgets. Only counted on Overall when it is on. |
 | **Mortgage** | The balance running down, interest against capital, the date the fixed rate ends, what an overpayment would save, what a new rate would cost. |
 | **Retirement** | A plan one row a year to the end of retirement, **Pensions** (final salary, pots, annuities, South African retirement annuities) and the **State Pension**. |
 
 Mortgage and Retirement can be switched off in Settings. Settings is the gear at the top
 right; Help (bottom of the sidebar) opens an email to Allan with the version and the
-screen, and nothing about money.
+screen, and nothing about money. **Words** (beside it, and in Settings › Help and the plan
+review) explains the terms Whiskers uses in plain English, each with a link to a fuller
+explanation.
 
 On a phone the tabs move to the bottom of the screen and each tab's screens run along the
 top. An Android phone runs the Whiskers app, which follows the PC. For any other phone (an
@@ -70,7 +72,10 @@ parts**:
   matters, with the biggest as your **main watch**. That becomes the dial on Overall and
   Summary, and the lights and signals on Market watch. Someone whose money rides on gold
   and gilts gets gold and interest-rate lights; someone with a lot in technology funds
-  gets the AI watch. A copy that never chooses keeps the original AI watch.
+  gets the AI watch. A copy that never chooses keeps the original AI watch. Market watch
+  also lists any theme *outside* the watch whose own lights have turned red (never counted
+  in the dial), and if the money moves on from a main watch the review chose, Things to
+  look at asks whether to switch; nothing switches by itself.
 - **Your rules**, **your plan for a fall**, stress tests (shares down a third, rates up a
   point, the rand down a fifth, and each watched theme's own worst fall of the last five
   years replayed on today's holdings), and **things worth doing**, with dates: filling a
@@ -82,8 +87,9 @@ to (a world fund to the core, a gilt fund to gilts) and says so; the Allocation 
 shows them all to check.
 
 **The written plan** is everything decided, in one page, to print or save. **Download the
-review pack** saves a plain-text file with the plan, every holding and the X-Ray, to hand
-to an adviser (or Claude) for a second opinion; read it before sharing it.
+review pack** saves a plain-text file with the plan, every holding and the X-Ray, the
+thesis cards (with Seeking Alpha factor grades if typed in) and the valuations, to hand to
+an adviser (or Claude) for a second opinion; read it before sharing it.
 
 ## The retirement plan
 

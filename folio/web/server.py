@@ -91,7 +91,7 @@ def api_bootstrap(req, m, q, body):
         "settings": {k: s.get(k) for k in ("user_name", "toured", "help_email", "isa_allowance",
                                            "fscs_limit", "refresh_on_open", "theme",
                                            "hide_amounts", "show_mortgage", "show_retirement",
-                                           "budget_on")},
+                                           "budget_on", "text_size")},
         "watch": {k: v for k, v in themes.watch().items() if k in ("main", "themes", "legacy")}
                  | {"title": themes.title(themes.watch()["main"])},
         "vault": security.storage_backend(),
@@ -546,7 +546,7 @@ def api_settings(req, m, q, body):
 SETTABLE = {"user_name", "isa_allowance", "fscs_limit", "refresh_on_open", "stooq_key",
             "check_for_updates", "auto_download_updates", "update_url", "toured", "theme",
             "hide_amounts", "show_mortgage", "show_retirement", "budget_on", "reminder_day",
-            "reminder_on", "statements_folder"}
+            "reminder_on", "statements_folder", "text_size"}
 
 
 @route("PATCH", "/api/settings")
@@ -564,6 +564,8 @@ def api_patch_settings(req, m, q, body):
         incoming["user_name"] = str(incoming["user_name"] or "").strip()[:60]
     if "theme" in incoming and incoming["theme"] not in ("clock", "system", "light", "dark"):
         raise ApiError("Unknown theme.")
+    if "text_size" in incoming and incoming["text_size"] not in ("normal", "larger", "largest"):
+        raise ApiError("Unknown text size.")
     for k in ("hide_amounts", "show_mortgage", "show_retirement", "budget_on", "reminder_on"):
         if k in incoming:
             incoming[k] = bool(incoming[k])

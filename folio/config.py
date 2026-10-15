@@ -78,6 +78,8 @@ DEFAULTS = {
     #: "system" follows the computer; "light" and "dark" are fixed.
     "theme": "clock",
     "hide_amounts": False,
+    #: "normal", "larger" or "largest": text only; charts keep their size.
+    "text_size": "normal",
     # 2.0: the tabs. Overall and Investments are always there; the rest can be switched off,
     # and the Budget is off until somebody wants it (and only then counts on Overall).
     "show_mortgage": True,

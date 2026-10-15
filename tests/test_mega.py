@@ -299,6 +299,18 @@ def test_the_statements_folder_imports_what_it_can_place_and_leaves_the_rest(tmp
     assert [a["file"] for a in again["already"]] == ["copy.csv"]
 
 
+def test_the_statements_folder_goes_in_the_documents_folder_windows_shows(tmp_path, monkeypatch):
+    # OneDrive often moves Documents and leaves an empty C:\Users\name\Documents behind
+    home, moved = tmp_path / "home", tmp_path / "home" / "OneDrive" / "Documents"
+    (home / "Documents").mkdir(parents=True)
+    moved.mkdir(parents=True)
+    monkeypatch.setattr(inbox.pathlib.Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(inbox, "_windows_documents", lambda: moved)
+    assert inbox.default_folder().parent == moved
+    monkeypatch.setattr(inbox, "_windows_documents", lambda: None)   # not Windows, or no answer
+    assert inbox.default_folder().parent == home / "Documents"
+
+
 def test_the_reminder_repeats_monthly_and_last_day_means_the_last_day():
     config.settings.update({"reminder_day": 31})
     ics = reminders.ics(dt.date(2026, 2, 3))
@@ -541,6 +553,21 @@ def test_the_budget_answers_only_when_it_is_switched_on(server):
     config.settings.update({"budget_on": True})
     status, body, _ = _get(server, "/api/budget")
     assert status == 200 and "month" in json.loads(body)
+
+
+def test_text_size_is_a_setting_with_three_sizes(server):
+    def patch(v):
+        req = urllib.request.Request(f"http://127.0.0.1:{server}/api/settings", method="PATCH",
+                                     data=json.dumps({"text_size": v}).encode(), headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
+    assert patch("largest") == 200 and config.settings.get("text_size") == "largest"
+    assert patch("enormous") == 400 and config.settings.get("text_size") == "largest"
+    status, body, _ = _get(server, "/api/bootstrap")
+    assert json.loads(body)["settings"]["text_size"] == "largest"
 
 
 def test_the_new_routes_never_use_error_for_anything_but_failure():
