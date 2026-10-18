@@ -12,16 +12,27 @@ about your portfolio is sent anywhere.
 It is not financial advice. Every figure it shows is arithmetic on your own holdings and
 your own rules.
 
-## Version 2.0 (in testing on the `mega` branch)
+## Version 1.1 (in testing on the `sections` branch)
 
-2.0 makes Whiskers one app for the whole picture, with five tabs: **Overall** (net worth,
-a health tile per tab, the big picture, dates coming up, and an eight-part **plan
-review** that builds a plan and a market watch around the person using it),
-**Investments** (everything below, plus importing files and a statements folder),
-**Budget** (off until switched on), **Mortgage**, and **Retirement** (a year-by-year plan,
-pensions and the State Pension). Read [docs/WHISKERS-2.md](docs/WHISKERS-2.md) for what each
-part does and what it assumes. To try it without touching an existing copy's data,
-double-click `Try Whiskers 2.0 (test copy).bat`.
+Whiskers looks and works as it did, with the same seven screens. 1.1 adds:
+
+- **Two optional sections, Mortgage and Retirement**, off until somebody wants them
+  (Settings, Sections). Each adds one screen to the sidebar and one line to the Overview,
+  with net worth counting what the switched-on sections hold. Off means nothing on screen
+  and nothing counted.
+- **The plan builder**, a page of its own (Settings, Your plan): investing questions only,
+  a view on each theme in the person's own words (how strongly they believe in it, how
+  worried they are, and what they want to do about it, including "ride it, with a
+  parachute"), then a review of the plan already in Whiskers, or a fresh plan. It can also
+  write a brief for Claude and check the plan file that comes back before loading it.
+- **Parachute steps and buying points**: a step agreed in calm weather for when a theme's
+  warning lights turn, shown on the Overview and Market watch with the person's own reasons.
+- From Mittens & Pence: the catalogue of UK and South African firms, drag-and-drop import
+  with a statements folder and a monthly reminder, and the Help button.
+
+Read [docs/WHISKERS-1.1.md](docs/WHISKERS-1.1.md) for what each part does and what it
+assumes. To try it without touching an existing copy's data, double-click
+`Try Whiskers 1.1 (test copy).bat`.
 
 ## Setting it up
 
@@ -211,10 +222,10 @@ out. `docs/PUBLISHING.md` walks through it; in short, make a public repository c
 `whiskers` under Stumpyf1Allan, put this folder on it, and run the Release workflow with a
 tag matching the version number. People download from the repository's Releases page.
 
-Don't share your own plan file: it's yours. New users answer the ten questions in
-**Build a plan from questions** (Welcome screen or Settings) for a starting plan, see
-why each figure was chosen, and change anything afterwards. It names kinds of
-investment, never particular funds, and it isn't advice.
+Don't share your own plan file: it's yours. New users open the **plan builder** (Welcome
+screen or Settings, Your plan), answer its five short steps, and get a plan shaped by
+their own answers and views, with the reason for each figure; anything can be changed
+afterwards. It names kinds of investment, never particular funds, and it isn't advice.
 
 ## Your data
 

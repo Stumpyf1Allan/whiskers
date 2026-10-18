@@ -24,8 +24,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .. import android, config, db, inbox, net, security, sync, updates
 from ..brokers import freetrade, monzo, symbols, trading212
-from ..engine import (allocation, export, isa, mathx, narrative, plan, planbuilder, playbook, portfolio,
-                      rules, sample, signals, stress, themes)
+from ..engine import (allocation, export, isa, mathx, narrative, plan, playbook, portfolio, rules, sample,
+                      sections, signals, stress, themes)
 from ..market import catalogue, sources, store
 
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
@@ -91,7 +91,7 @@ def api_bootstrap(req, m, q, body):
         "settings": {k: s.get(k) for k in ("user_name", "toured", "help_email", "isa_allowance",
                                            "fscs_limit", "refresh_on_open", "theme",
                                            "hide_amounts", "show_mortgage", "show_retirement",
-                                           "budget_on", "text_size")},
+                                           "text_size")},
         "watch": {k: v for k, v in themes.watch().items() if k in ("main", "themes", "legacy")}
                  | {"title": themes.title(themes.watch()["main"])},
         "vault": security.storage_backend(),
@@ -159,7 +159,17 @@ def api_overview(req, m, q, body):
         "snapshots": [[d, v] for d, v in portfolio.snapshots()],
         "money_in": [[d, v] for d, v in portfolio.money_in()],
         "movers": [{k: x[k] for k in ("name", "day_change", "day_pct", "instrument_id")} for x in movers],
+        # The optional sections' lines: None, and nothing on screen, while both are off.
+        "sections": _sections_overview(pos, tot),
     }
+
+
+def _sections_overview(pos, tot):
+    try:
+        return sections.overview(pos, tot)
+    except Exception as e:                    # a section's line is never worth a broken Overview
+        db.log("sections.error", str(e))
+        return None
 
 
 # ============================================================================ holdings
@@ -348,13 +358,17 @@ def api_allocation(req, m, q, body):
             seen.add(u["instrument_id"])
             dedup.append(u)
     statuses = []
-    for s in rules.rule_status(pos, tot, exp):
+    for s in rules.rule_status(pos, tot, exp, market):
         r = s["rule"]
         statuses.append({"id": r["id"], "kind": r["kind"], "subject": r["subject"],
                          "trigger": r["trigger_pct"], "target": r["target_pct"], "basis": r["basis"],
                          "note": r["note"], "now": s["now"], "level": s["level"],
                          "trim": s.get("trim"), "amber_from": s.get("amber_from"),
-                         "detail": s.get("detail")})
+                         "detail": s.get("detail"), "sleeve": r.get("sleeve"), "into": r.get("into_sleeve"),
+                         "move": s.get("move"), "done": s.get("done"),
+                         "title": themes.title(r["subject"]) if r["kind"] in ("theme_step", "theme_dip")
+                         and r["subject"] else None,
+                         "label": themes.label(r["subject"]) if r["kind"] == "exposure_cap" and r["subject"] else None})
     by_sleeve = {}
     for x in pos:
         by_sleeve.setdefault(x["sleeve_id"], []).append(
@@ -364,7 +378,7 @@ def api_allocation(req, m, q, body):
             "unassigned": dedup, "rules": statuses, "total": tot["total"], "holding_targets": ht,
             "members": {str(k): v for k, v in by_sleeve.items()},
             "warnings": [w for w in warns if w["kind"] in ("drift", "company_cap", "theme_cap",
-                                                           "ai_cap", "data")]}
+                                                           "ai_cap", "any_company_cap", "data")]}
 
 
 @route("POST", "/api/allocation/new-money")
@@ -406,12 +420,34 @@ def api_ai(req, m, q, body):
         if rp:
             replays.append(rp | {"title": themes.title(t)})
     return {"exposure": exp, "totals": {k: tot[k] for k in ("total", "cash", "invested")},
-            "market": market, "context": signals.context(), "plans": plans,
+            "market": market, "context": signals.context(), "plans": plans, "steps": _steps(pos, tot, exp, market),
             "dotcom": stress.DOTCOM, "worst": back.get("worst"), "playbook": pb,
             "narratives": narrative.watch(market, pb),
             "coverage": back["coverage"], "cap": cap, "theme_exposure": theme_exp,
             "replays": replays, "standard": stress.standard(pos, tot), "moved": _moved(w),
             "library": [{"key": k, "label": v["label"], "about": v["about"]} for k, v in themes.LIBRARY.items()]}
+
+
+def _steps(pos, tot, exp, market) -> list[dict]:
+    """The steps agreed in calm weather (parachutes and buying points), each with where it
+    stands and the person's own reasons beside it."""
+    views = ((db.get_meta("builder", {}) or {}).get("answers") or {}).get("views") or {}
+    by_name = {s["name"]: s for s in allocation.sleeves()}
+    out = []
+    for s in rules.rule_status(pos, tot, exp, market):
+        r = s["rule"]
+        if r["kind"] not in plan.STEP_KINDS:
+            continue
+        v = views.get(r["subject"]) or {}
+        sl = by_name.get(r["sleeve"] if r["kind"] == "theme_step" else r["into_sleeve"]) or {}
+        out.append({"id": r["id"], "kind": r["kind"], "subject": r["subject"], "title": themes.title(r["subject"]),
+                    "trigger": r["trigger_pct"], "target": r["target_pct"], "sleeve": r["sleeve"], "into": r["into_sleeve"],
+                    "note": r["note"], "now": s["now"], "level": s["level"], "move": s.get("move"),
+                    "done": s.get("done"),
+                    "detail": {k: s["detail"].get(k) for k in ("reds", "ambers", "have", "of", "red_titles", "fall",
+                                                                "as_of")},
+                    "why": v.get("why") or sl.get("why"), "change": v.get("change") or sl.get("breakers")})
+    return out
 
 
 @route("PUT", "/api/signals/{key}")
@@ -545,7 +581,7 @@ def api_settings(req, m, q, body):
 
 SETTABLE = {"user_name", "isa_allowance", "fscs_limit", "refresh_on_open", "stooq_key",
             "check_for_updates", "auto_download_updates", "update_url", "toured", "theme",
-            "hide_amounts", "show_mortgage", "show_retirement", "budget_on", "reminder_day",
+            "hide_amounts", "show_mortgage", "show_retirement", "reminder_day",
             "reminder_on", "statements_folder", "text_size"}
 
 
@@ -566,7 +602,7 @@ def api_patch_settings(req, m, q, body):
         raise ApiError("Unknown theme.")
     if "text_size" in incoming and incoming["text_size"] not in ("normal", "larger", "largest"):
         raise ApiError("Unknown text size.")
-    for k in ("hide_amounts", "show_mortgage", "show_retirement", "budget_on", "reminder_on"):
+    for k in ("hide_amounts", "show_mortgage", "show_retirement", "reminder_on"):
         if k in incoming:
             incoming[k] = bool(incoming[k])
     if "reminder_day" in incoming:
@@ -793,10 +829,12 @@ def api_delete_sleeve(req, m, q, body):
 def api_add_rule(req, m, q, body):
     b = body or {}
     kind = b.get("kind")
-    if kind not in plan.KINDS:
+    if kind not in plan.CAP_KINDS:
         raise ApiError("Unknown kind of rule.")
     subject = str(b.get("subject") or "").strip() or None
-    if kind != "ai_cap" and not subject:
+    if kind == "any_company_cap":
+        subject = None
+    elif kind != "ai_cap" and not subject:
         raise ApiError("Say which company or theme the rule is about.")
     trig = _float(b.get("trigger"), "The trigger", 0.1, 100)
     tgt = _float(b.get("target"), "The level to bring it back to", 0, 100, allow_none=True)
@@ -814,6 +852,31 @@ def api_add_rule(req, m, q, body):
 def api_delete_rule(req, m, q, body):
     db.execute("DELETE FROM rules WHERE id=?", (_int(m["rid"]),))
     return {"ok": True}
+
+
+@route("POST", "/api/rules/{rid}/done")
+def api_rule_done(req, m, q, body):
+    """A parachute step or a buying point taken. With "targets", the two sleeves' targets move
+    too, so the next rebalance doesn't undo it. It applies again once the lights clear."""
+    rid = _int(m["rid"])
+    r = db.one("SELECT * FROM rules WHERE id=?", (rid,))
+    if not r or r["kind"] not in plan.STEP_KINDS:
+        raise ApiError("That rule has no step to take.", 404)
+    moved = None
+    if (body or {}).get("targets"):
+        fr = db.one("SELECT * FROM sleeves WHERE name=?", (r["sleeve"],))
+        to = db.one("SELECT * FROM sleeves WHERE name=?", (r["into_sleeve"],))
+        if not fr or not to:
+            raise ApiError("One of the step's sleeves no longer exists, so its targets can't move.")
+        pts = (float(fr["target"]) * float(r["target_pct"] or 33) / 100 if r["kind"] == "theme_step"
+               else min(float(r["target_pct"] or 0), float(fr["target"])))
+        pts = round(pts * 2) / 2
+        with db.tx() as c:
+            c.execute("UPDATE sleeves SET target=? WHERE id=?", (round(float(fr["target"]) - pts, 2), fr["id"]))
+            c.execute("UPDATE sleeves SET target=? WHERE id=?", (round(float(to["target"]) + pts, 2), to["id"]))
+        moved = {"points": pts, "from": fr["name"], "to": to["name"]}
+    rules.mark_done(rid)
+    return {"ok": True, "moved": moved}
 
 
 @route("POST", "/api/lookthrough")
@@ -842,17 +905,6 @@ def api_plan_import(req, m, q, body):
         return {"ok": True, "report": plan.import_plan(body if isinstance(body, dict) else (body or b""))}
     except plan.PlanError as e:
         raise ApiError(str(e)) from None
-
-
-@route("GET", "/api/plan/questions")
-def api_plan_questions(req, m, q, body):
-    return {"questions": planbuilder.QUESTIONS}
-
-
-@route("POST", "/api/plan/build")
-def api_plan_build(req, m, q, body):
-    """A draft only: nothing is saved until the person chooses to use it."""
-    return planbuilder.build((body or {}).get("answers") or {})
 
 
 @route("GET", "/api/export/xlsx")

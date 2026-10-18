@@ -227,11 +227,13 @@ def _cash(wb: Workbook) -> None:
     _autoheight(ws)
 
 
-# ---------------------------------------------------------------------------- 2.0: the rest of the picture
+# ---------------------------------------------------------------------------- 1.1: the optional sections
 
 def _networth(wb: Workbook) -> None:
-    from . import overall
-    bs = overall.balance_sheet()
+    from . import sections
+    if not sections.any_on():
+        return
+    bs = sections.balance_sheet()
     ws = _sheet(wb, "Net worth", ["", "Amount (\u00a3)"], [34, 16])
     for k, v in bs["own"].items():
         _row(ws, [f"Own: {k}", v], {2: MONEY})
@@ -243,7 +245,7 @@ def _networth(wb: Workbook) -> None:
         _row(ws, [f"Pension promised a year: {p['name']}", p["yearly"]], {2: MONEY})
     if bs["unconverted"]:
         _row(ws, [f"Left out, no exchange rate yet: {', '.join(bs['unconverted'])}", None])
-    hist = overall.history()
+    hist = sections.history()
     if hist:
         ws.append([])
         _row(ws, ["Day", "Net worth (\u00a3)"])
@@ -330,9 +332,14 @@ def build() -> bytes:
     _dividends(wb)
     _trades(wb)
     _cash(wb)
-    _mortgages(wb)
-    _pensions(wb)
-    _retirement(wb)
+    # A section that is switched off is left out, here as everywhere.
+    from . import sections
+    sec = sections.on()
+    if sec["mortgage"]:
+        _mortgages(wb)
+    if sec["retirement"]:
+        _pensions(wb)
+        _retirement(wb)
     wb.active = 0
     # Values only. openpyxl turns any text starting with "=" into a live formula, and
     # names, notes and plan files are typed by people, so nothing may calculate, link

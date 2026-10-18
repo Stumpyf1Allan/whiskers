@@ -1,4 +1,5 @@
-"""Tests for 2.0: one app with Overall, Investments, Budget, Mortgage and Retirement tabs.
+"""Tests for 1.1: the optional Mortgage and Retirement sections, the plan builder with its
+theme views, parachutes and brief, importing files, and the catalogue of firms.
 
 Grouped like the rest: by what would go wrong for a person if the test didn't exist.
 """
@@ -13,8 +14,8 @@ import urllib.request
 import pytest
 
 from folio import config, db, inbox, reminders
-from folio.engine import (builder, mortgage as mort, overall, pensions, retirement, sample, statepension,
-                          themes, uktax, xray)
+from folio.engine import (builder, mortgage as mort, pensions, plan, retirement, rules, sample, sections,
+                          statepension, themes, uktax, xray)
 from folio.importers import investments as inv
 
 from .test_whiskers import add_platform, add_position
@@ -22,6 +23,11 @@ from .test_whiskers import add_platform, add_position
 
 def _years_ago(n: float) -> str:
     return (dt.date.today() - dt.timedelta(days=round(n * 365.25))).isoformat()
+
+
+def _on(**kw):
+    """Switch sections on: show_mortgage=True, show_retirement=True."""
+    config.settings.update({f"show_{k}": v for k, v in kw.items()})
 
 
 def _basic_plan(**kw):
@@ -115,8 +121,9 @@ def test_the_home_has_one_value_wherever_it_is_read():
     with db.tx() as c:
         home = c.execute("INSERT INTO assets(name,kind,value,is_home) VALUES('Home','property',300000,1)").lastrowid
     _mortgage(property_asset_id=home, property_value=999999)
-    bs = overall.balance_sheet()
-    assert bs["own"]["Property"] == 300000                       # not 300,000 + 999,999
+    _on(mortgage=True)
+    bs = sections.balance_sheet()
+    assert bs["own"]["Home and property"] == 300000              # not 300,000 + 999,999
     assert mort.summarise(mort.all_mortgages()[0])["property_value"] == 300000
 
 
@@ -124,7 +131,8 @@ def test_the_home_has_one_value_wherever_it_is_read():
 
 def test_a_final_salary_pension_is_income_not_money_owned():
     pensions.add({"name": "NHS Pension", "kind": "db", "yearly": 12000, "normal_age": 67})
-    bs = overall.balance_sheet()
+    _on(retirement=True)
+    bs = sections.balance_sheet()
     assert "Pensions" not in bs["own"] and bs["promised"][0]["yearly"] == 12000
 
 
@@ -211,6 +219,7 @@ def test_a_uk_state_pension_paid_in_south_africa_is_frozen():
 
 def test_after_a_fixed_deal_the_plan_assumes_a_new_one_not_the_standard_rate():
     _basic_plan()
+    _on(mortgage=True)
     end = (dt.date.today() + dt.timedelta(days=90)).isoformat()
     _mortgage(fixed_until=end, revert_rate=9.0, rate=3.0, monthly_payment=474.21)
     s, data = retirement.settings(), retirement.gather()
@@ -222,6 +231,7 @@ def test_after_a_fixed_deal_the_plan_assumes_a_new_one_not_the_standard_rate():
 def test_a_fixed_payment_weighs_less_each_year_in_todays_money():
     _basic_plan()
     _mortgage()
+    _on(mortgage=True)
     rows = retirement.analyse(full=False)["plan"]["rows"]
     assert rows[1]["mortgage"] > rows[5]["mortgage"] > 0
 
@@ -244,52 +254,7 @@ def test_a_what_if_saves_nothing():
     assert retirement.settings()["stop_age"] == before["stop_age"]
 
 
-# ============================================================================ the plan review
-
-def test_answers_the_retirement_tab_uses_are_stored_once():
-    builder.save_answers({"stop_age": 61, "sp_weekly": 210})
-    s = retirement.settings()
-    assert s["stop_age"] == 61 and s["state_pension"]["weekly"] == 210
-    retirement.save({"stop_age": 63})
-    assert builder.answers()["stop_age"] == 63
-
-
-def test_the_apps_own_defaults_are_not_counted_as_answers():
-    a = builder.answers()
-    assert "nation" not in a and "plan_to" not in a and "emergency_months" not in a
-    builder.save_answers({"nation": "england"})
-    assert builder.answers()["nation"] == "england"
-
-
-def test_risk_is_the_lower_of_willing_and_able_and_a_real_sale_counts_most():
-    _basic_plan(dob=_years_ago(40), stop_age=60)
-    s = retirement.settings()
-    bold = builder.risk_profile({"fall": "buy", "experience": "long", "prefer": "growth", "work": "very"}, s, None)
-    timid = builder.risk_profile({"fall": "sell", "experience": "new", "prefer": "steady"}, s, None)
-    assert timid["growth"] < bold["growth"] and timid["growth"] == min(timid["willing"], timid["able"])
-    sold = builder.risk_profile({"fall": "buy", "did": "sold", "experience": "long", "prefer": "growth"}, s, None)
-    assert sold["willing"] < bold["willing"]
-
-
-def test_a_draft_changes_nothing_until_it_is_used():
-    sample.load()
-    before = [(x["name"], x["target"]) for x in db.rows("SELECT name, target FROM sleeves ORDER BY id")]
-    builder.save_answers({"fall": "worry", "experience": "few", "prefer": "balanced", "believe": ["gold"]})
-    d = builder.draft()
-    assert sum(x["target"] for x in d["plan"]["sleeves"]) == pytest.approx(100)
-    assert [(x["name"], x["target"]) for x in db.rows("SELECT name, target FROM sleeves ORDER BY id")] == before
-    builder.apply({"sleeves": True, "rules": True, "watch": True, "plans": True})
-    after = [x["name"] for x in db.rows("SELECT name FROM sleeves")]
-    assert "Global core index" in after and themes.watch()["legacy"] is False
-
-
-def test_the_written_plan_and_review_pack_are_made_without_errors():
-    sample.load()
-    w = builder.written_plan()
-    assert w["sections"] and all(s["title"] for s in w["sections"])
-    pack = builder.review_pack()
-    assert pack.startswith("# Review pack") and "Not financial advice" in pack
-
+# ============================================================================ words
 
 def test_titles_keep_their_capitals_inside_a_sentence():
     assert themes.lower_first("The AI trade") == "the AI trade"
@@ -364,51 +329,14 @@ def test_the_reminder_repeats_monthly_and_last_day_means_the_last_day():
 def test_rand_is_converted_and_never_counted_one_for_one():
     with db.tx() as c:
         c.execute("INSERT INTO platforms(name,provider,wrapper,cash,currency) VALUES('Capitec','bank','cash',10000,'ZAR')")
-    bs = overall.balance_sheet()
+    bs = sections.balance_sheet()
     assert bs["unconverted"] == ["Capitec"] and "Cash" not in bs["own"]     # no rate yet: left out, and said so
     from .test_whiskers import price_series
     price_series("FX:ZAR", [23.26] * 5)                       # rand per pound
     from folio.market import store
     store._fx_cache.clear()
-    bs = overall.balance_sheet()
+    bs = sections.balance_sheet()
     assert bs["own"]["Cash"] == pytest.approx(430, abs=1) and not bs["unconverted"]
-
-
-# ============================================================================ the Budget tab
-
-BANK_CSV = (b"Date,Description,Amount,Balance\n"
-            b"01/10/2026,SALARY ACME LTD,2500.00,3100.00\n"
-            b"03/10/2026,TESCO STORES 3021,-54.20,3045.80\n"
-            b"05/10/2026,CORNER CAFE,-4.50,3041.30\n"
-            b"06/10/2026,TRANSFER TO VANGUARD ISA,-300.00,2741.30\n")
-
-
-def test_a_bank_statement_goes_in_once_and_is_sorted():
-    config.settings.update({"budget_on": True})
-    pid = add_platform("Barclays", "bank")
-    with db.tx() as c:
-        c.execute("UPDATE platforms SET provider='bank' WHERE id=?", (pid,))
-    from folio.budget import categories, engine, ingest
-    plat = db.one("SELECT * FROM platforms WHERE id=?", (pid,))
-    first = ingest.import_statement(BANK_CSV, "barclays.csv", plat)
-    again = ingest.import_statement(BANK_CSV, "barclays.csv", plat)
-    assert first["added"] == 4 and again["added"] == 0
-    tesco = db.one("SELECT t.*, c.name FROM txns t JOIN txn_categories c ON c.id=t.category_id WHERE description LIKE 'TESCO%'")
-    assert tesco["name"] == "Groceries"
-    assert db.scalar("SELECT cash FROM platforms WHERE id=?", (pid,)) == pytest.approx(2741.30)
-    m = engine.month("2026-10")
-    assert m["in"] == pytest.approx(2500) and m["saved"] == pytest.approx(300)
-    cafe = db.one("SELECT id FROM txns WHERE description='CORNER CAFE'")
-    coffee = db.scalar("SELECT id FROM txn_categories WHERE name='Coffee & snacks'")
-    categories.set_category(cafe["id"], coffee, remember=True)
-    assert db.scalar("SELECT COUNT(*) FROM txn_rules WHERE pattern='corner cafe'") == 1
-
-
-def test_the_budget_counts_on_overall_only_when_it_is_switched_on():
-    keys = lambda: [t["key"] for t in overall.summary()["tiles"]]  # noqa: E731
-    assert "budget" not in keys()
-    config.settings.update({"budget_on": True})
-    assert "budget" in keys()
 
 
 # ============================================================================ market data that stops
@@ -445,22 +373,8 @@ def test_a_light_whose_source_stopped_publishing_is_left_out_not_shown_as_curren
     assert signals.reading(defn)["level"] in ("green", "amber", "red")
 
 
-def test_valuations_typed_by_hand_keep_their_date_and_age():
-    from folio.engine import valuations
-    old = (dt.date.today() - dt.timedelta(days=200)).isoformat()
-    v = valuations.save({"cape_us": {"value": "38.4", "on": old, "note": "multpl"}, "erp": {"value": "4.1%"}})
-    assert v["cape_us"]["value"] == 38.4 and v["cape_us"]["old"] and not v["erp"]["old"]
-    with pytest.raises(valuations.ValuationError):
-        valuations.save({"fpe_us": {"value": "lots"}})
-    with pytest.raises(valuations.ValuationError):
-        valuations.save({"fpe_us": {"value": "21", "on": "2999-01-01"}})
-    assert "erp" not in valuations.save({"erp": {"value": ""}})          # a blank clears it
-    assert any("CAPE" in x and "now old" in x for x in valuations.lines())
-    assert "Valuations, typed in by hand" in builder.review_pack()
-
-
 def test_the_app_asks_before_moving_the_main_watch_and_never_when_it_was_picked():
-    from folio.engine import portfolio, rules, themes
+    from folio.engine import portfolio
     pid = add_platform(cash=0.0)
     add_position(pid, "SGLN", exchange="LSE", name="iShares Physical Gold ETC", broker_value=6000.0, valued_at=db.now())
     add_position(pid, "IGLT", exchange="LSE", name="iShares Core UK Gilts UCITS ETF", broker_value=3000.0,
@@ -469,19 +383,22 @@ def test_the_app_asks_before_moving_the_main_watch_and_never_when_it_was_picked(
     tot = portfolio.totals(pos)
     assert rules._watch_moved(pos, tot) is None                  # the original AI watch is left alone
     themes.set_watch("rates", ["rates", "gold"], None)
-    db.set_meta("builder", {"answers": {"main_theme": "auto"}, "at": {}, "mood": {}})
+    db.set_meta("builder", {"v": 2, "answers": {"watch_main": "auto"}, "at": {}, "mood": {}})
     w = rules._watch_moved(pos, tot)
     assert w and w["level"] == "info" and "Make gold your main watch?" in w["detail"]
-    db.set_meta("builder", {"answers": {"main_theme": "rates"}, "at": {}, "mood": {}})
+    db.set_meta("builder", {"v": 2, "answers": {"watch_main": "rates"}, "at": {}, "mood": {}})
     assert rules._watch_moved(pos, tot) is None                  # picked by name: theirs to keep
+    db.set_meta("builder", {"v": 2, "answers": {"views": {"rates": {"action": "parachute"}}}, "at": {}, "mood": {}})
+    assert rules._watch_moved(pos, tot) is None                  # watched for its parachute, whatever it carries
 
 
-def test_the_mortgage_tile_says_whether_it_outlives_work():
-    from folio.engine import overall
+def test_the_mortgage_line_says_whether_it_outlives_work():
     retirement.save({"dob": _years_ago(55), "stop_age": 60})
     payoff = dt.date.today() + dt.timedelta(days=round(8 * 365.25))
-    assert overall._clear_by(payoff).endswith("3 years after you stop")
-    assert overall._clear_by(dt.date.today() + dt.timedelta(days=365)).endswith("before you stop")
+    assert sections._clear_by(payoff).startswith("clears ") and "after" not in sections._clear_by(payoff)
+    _on(retirement=True)                                        # the stopping age is the Retirement section's
+    assert sections._clear_by(payoff).endswith("3 years after you stop work")
+    assert sections._clear_by(dt.date.today() + dt.timedelta(days=365)).endswith("before you stop work")
 
 
 def test_a_theme_outside_the_watch_that_turns_red_is_listed_but_never_moves_the_dial():
@@ -496,7 +413,7 @@ def test_a_theme_outside_the_watch_that_turns_red_is_listed_but_never_moves_the_
     assert "oil" not in signals.evaluate()["groups"]          # and the dial never counts it
 
 
-def test_a_thesis_keeps_its_factor_grades_and_the_review_pack_shows_them():
+def test_a_thesis_keeps_its_factor_grades_and_the_brief_shows_them():
     from folio.web import routes2
     pid = add_platform()
     iid = add_position(pid, "AZN", exchange="LSE", name="AstraZeneca", broker_value=5000.0, valued_at=db.now())
@@ -505,14 +422,15 @@ def test_a_thesis_keeps_its_factor_grades_and_the_review_pack_shows_them():
     row = db.one("SELECT factors FROM theses WHERE instrument_id=?", (iid,))
     f = json.loads(row["factors"])
     assert f["valuation"] == "C-" and f["growth"] == "A" and "momentum" not in f and "nonsense" not in f and f["on"]
-    assert "Factor grades" in builder.review_pack()
+    brief = builder.brief()
+    assert "Factor grades" in brief and "Oncology pipeline" in brief and "Pipeline fails" in brief
     routes2.api_save_thesis(None, {"iid": str(iid)}, {}, {"why": "Oncology pipeline", "factors": {}})
     assert db.one("SELECT factors FROM theses WHERE instrument_id=?", (iid,))["factors"] is None
 
 
-# ============================================================================ the sample household
+# ============================================================================ the sample
 
-def test_the_sample_household_comes_out_completely_and_keeps_your_own_details():
+def test_the_sample_comes_out_completely_and_keeps_your_own_details():
     sample.load()
     assert db.scalar("SELECT COUNT(*) FROM pensions", (), 0) == 2 and mort.all_mortgages()
     sample.remove()
@@ -544,9 +462,10 @@ def _get(port, path):
         return e.code, e.read(), ""
 
 
-NEW_SCREENS = ("/api/overall", "/api/assets", "/api/mortgages", "/api/pensions", "/api/retirement",
-               "/api/builder", "/api/builder/draft", "/api/builder/written", "/api/xray", "/api/watch",
-               "/api/institutions?q=hargreaves", "/api/inbox", "/api/reminder")
+NEW_SCREENS = ("/api/assets", "/api/mortgages", "/api/pensions", "/api/retirement", "/api/overview",
+               "/api/builder", "/api/builder/draft", "/api/builder/draft?mode=fresh", "/api/builder/written",
+               "/api/xray", "/api/watch", "/api/ai", "/api/allocation", "/api/institutions?q=hargreaves",
+               "/api/inbox", "/api/reminder")
 
 
 def test_every_new_screen_answers_on_an_empty_copy(server):
@@ -563,37 +482,8 @@ def test_every_new_screen_answers_with_the_sample_household(server):
         assert status == 200, (path, body[:300])
     status, body, ctype = _get(server, "/api/builder/written.html")
     assert status == 200 and b"<h1>" in body and "text/html" in ctype
-
-
-def test_a_copy_for_a_phone_is_one_page_with_nothing_that_calls_out(server):
-    sample.load()
-    add_position(add_platform(name="<b>Odd & name</b>", cash=10.0), "ABC", name="<i>A fund</i>",
-                 broker_value=1234.0, valued_at=db.now())
-    from folio.engine import phonecopy
-    page = phonecopy.build().decode("utf-8")
-    assert page.startswith("<!doctype html>") and "A snapshot from" in page
-    for part in ("Net worth", "How each part is doing", "Retirement", "Your investments", "Mortgage", "Pensions",
-                 "Cash and savings", "Coming up"):
-        assert f"<h2>{part}</h2>" in page, part
-    assert "[[" not in page and "<script" not in page.lower() and "src=" not in page
-    assert "http://" not in page and "https://" not in page
-    assert "&lt;i&gt;A fund&lt;/i&gt;" in page and "<i>A fund</i>" not in page
-    assert "R48,000" in page                     # rand shown as rand, with pounds beside it
-    status, body, ctype = _get(server, "/api/export/phone")
-    assert status == 200 and "text/html" in ctype and body.startswith(b"<!doctype html>")
-
-
-def test_a_copy_for_a_phone_works_on_an_empty_copy():
-    from folio.engine import phonecopy
-    page = phonecopy.build().decode("utf-8")
-    assert "Net worth" in page and "needs" in page          # the plan says what it still needs
-
-
-def test_the_budget_answers_only_when_it_is_switched_on(server):
-    assert _get(server, "/api/budget")[0] == 400
-    config.settings.update({"budget_on": True})
-    status, body, _ = _get(server, "/api/budget")
-    assert status == 200 and "month" in json.loads(body)
+    status, body, ctype = _get(server, "/api/builder/brief")
+    assert status == 200 and body.startswith(b"# Plan brief for Claude") and "markdown" in ctype
 
 
 def test_text_size_is_a_setting_with_three_sizes(server):
@@ -621,5 +511,303 @@ def test_a_built_app_carries_the_institution_catalogue_and_the_test_copy_keeps_a
     from .test_whiskers import ROOT
     spec = (ROOT / "build" / "whiskers.spec").read_text(encoding="utf-8")
     assert '"institutions/data"' in spec and "folio.web.routes2" in spec
-    bat = (ROOT / "Try Whiskers 2.0 (test copy).bat").read_text(encoding="utf-8")
-    assert 'WHISKERS_DATA_DIR=%LOCALAPPDATA%\\Whiskers 2.0 test' in bat
+    assert "folio.budget" not in spec and "phonecopy" not in spec
+    bat = (ROOT / "Try Whiskers 1.1 (test copy).bat").read_text(encoding="utf-8")
+    assert 'WHISKERS_DATA_DIR=%LOCALAPPDATA%\\Whiskers 1.1 test' in bat
+
+
+# ============================================================================ the optional sections
+
+def test_sections_off_means_nothing_shown_and_nothing_counted():
+    sample.load()                                       # brings a home, a mortgage and two pensions
+    from folio.engine import export, portfolio
+    assert sections.on() == {"mortgage": False, "retirement": False}
+    assert sections.overview() is None
+    bs = sections.balance_sheet()
+    assert "Home and property" not in bs["own"] and "Pensions" not in bs["own"] and not bs["owe"].get("Mortgage")
+    assert retirement.gather()["mortgages"] == []       # the retirement plan ignores a mortgage that is off
+    from openpyxl import load_workbook
+    import io
+    names = load_workbook(io.BytesIO(export.build())).sheetnames
+    assert not {"Mortgage", "Pensions", "Retirement", "Net worth"} & set(names)
+    total_before = portfolio.totals()["total"]
+    _on(mortgage=True, retirement=True)
+    assert portfolio.totals()["total"] == pytest.approx(total_before)     # investments never change
+    ov = sections.overview()
+    assert [x["key"] for x in ov["lines"]] == ["mortgage", "retirement"]
+    assert ov["own"]["Home and property"] > 0 and ov["owe"]["Mortgage"] > 0 and ov["own"]["Pensions"] > 0
+    names = load_workbook(io.BytesIO(export.build())).sheetnames
+    assert {"Mortgage", "Pensions"} <= set(names)
+
+
+def test_one_section_counts_only_its_own_parts():
+    sample.load()
+    _on(mortgage=True)
+    bs = sections.balance_sheet()
+    assert bs["owe"]["Mortgage"] > 0 and "Pensions" not in bs["own"]
+    assert [x["key"] for x in sections.overview()["lines"]] == ["mortgage"]
+
+
+def test_the_sections_that_suit_someone_are_offered_and_no_more():
+    assert sections.advice(36, False, 25, False) == {}                       # Allan: nothing
+    mum = sections.advice(69, True, 0, True)
+    assert set(mum) == {"mortgage", "retirement"}
+    assert "retirement" in sections.advice(58, False, 8, False) and "mortgage" not in sections.advice(58, False, 8, False)
+
+
+# ============================================================================ the plan builder
+
+ALLAN = {"whiskers_plan": 1, "replace_sleeves": True, "sleeves": [
+    {"name": "Global core index", "target": 23}, {"name": "Technology & AI", "target": 23, "ai_share": 100},
+    {"name": "Healthcare", "target": 9}, {"name": "Industrials & Materials", "target": 7.5},
+    {"name": "Commodities", "target": 7}, {"name": "Real assets", "target": 6.5}, {"name": "Consumer", "target": 5.5},
+    {"name": "Financials", "target": 4.5}, {"name": "Cash", "target": 4, "is_cash": True}, {"name": "Gilts", "target": 3},
+    {"name": "Energy", "target": 3}, {"name": "Defence", "target": 2}, {"name": "Speculative", "target": 2}],
+    "rules": [{"kind": "company_cap", "subject": "Alphabet", "trigger": 9.3, "target": 8, "basis": "direct"}]}
+ALLAN_ANSWERS = {
+    "need_when": "over20", "emergency": "yes", "income_pref": "growth", "age_band": "under40", "home": "no",
+    "fall": "buy", "did": "bought", "experience": "few", "prefer": "growth", "hands": "enjoy", "time": "lots",
+    "worries": ["bubble", "rates", "inflation"], "avoid": ["none"],
+    "views": {"ai": {"believe": 5, "worry": 4, "action": "parachute", "why": "The biggest change in my lifetime.",
+                     "change": "Hyperscalers cutting capex two quarters running."},
+              "healthcare": {"believe": 4, "worry": 2, "action": "ride"},
+              "industrials": {"believe": 4, "worry": 2, "action": "ride"},
+              "metals": {"believe": 3, "worry": 2, "action": "ride"},
+              "property": {"believe": 3, "worry": 3, "action": "ride"},
+              "consumer": {"believe": 3, "worry": 1, "action": "ride"},
+              "financials": {"believe": 3, "worry": 2, "action": "ride"},
+              "oil": {"believe": 2, "worry": 2, "action": "little"},
+              "defence": {"believe": 3, "worry": 2, "action": "little"},
+              "speculative": {"believe": 3, "worry": 4, "action": "little"}}}
+
+
+def _targets():
+    return {r["name"]: r["target"] for r in db.rows("SELECT name, target FROM sleeves")}
+
+
+def test_risk_is_the_lower_of_willing_and_able_and_a_real_sale_counts_most():
+    bold = builder.risk_profile({"fall": "buy", "experience": "long", "prefer": "growth", "need_when": "over20"}, {})
+    timid = builder.risk_profile({"fall": "sell", "experience": "new", "prefer": "steady", "need_when": "over20"}, {})
+    assert timid["growth"] < bold["growth"] and timid["growth"] == min(timid["willing"], timid["able"])
+    sold = builder.risk_profile({"fall": "buy", "did": "sold", "experience": "long", "prefer": "growth"}, {})
+    assert sold["willing"] < bold["willing"]
+    soon = builder.risk_profile({"fall": "buy", "experience": "long", "prefer": "growth", "need_when": "under5"}, {})
+    assert soon["growth"] < bold["growth"]
+
+
+def test_the_builder_asks_nothing_the_retirement_section_already_knows():
+    retirement.save({"dob": _years_ago(70.5), "stop_age": 72, "spend_essential": 1500})
+    a = builder.answers()
+    assert "need_when" not in a                          # the section is off: asked in the builder
+    _on(retirement=True)
+    a = builder.answers()
+    assert a["need_when"] == "under5" and a["age_band"] == "65to74"
+    builder.save_answers({"need_when": "over20"})        # a derived answer can't be overruled from here
+    assert builder.answers()["need_when"] == "under5"
+
+
+def test_answers_are_saved_as_given_and_views_merge():
+    builder.save_answers({"views": {"ai": {"believe": 5}}})
+    builder.save_answers({"views": {"ai": {"action": "parachute", "why": "  Real returns.  "}}})
+    builder.save_answers({"views": {"nonsense": {"believe": 3}, "gold": {"believe": 9, "action": "moon"}}})
+    v = builder.answers()["views"]
+    assert v["ai"] == {"believe": 5, "action": "parachute", "why": "Real returns."}
+    assert "nonsense" not in v and v["gold"] == {"believe": 5}
+    builder.save_answers({"fall": "panic"})              # not one of the options: ignored
+    assert "fall" not in builder.answers()
+
+
+def test_a_personal_plan_is_reviewed_not_replaced():
+    sample.load()
+    plan.import_plan(ALLAN)
+    builder.save_answers(ALLAN_ANSWERS)
+    before = _targets()
+    d = builder.draft()
+    assert d["mode"] == "review"
+    sugg = d["review"]["suggestions"]
+    assert not [s for s in sugg if s["kind"] in ("target", "add", "move")], [s["title"] for s in sugg]
+    kinds = {s["change"].get("rule", {}).get("kind") for s in sugg if s["kind"] == "rule"}
+    assert {"ai_cap", "theme_step", "any_company_cap"} <= kinds          # the parachute he asked for
+    step = next(s for s in sugg if s["kind"] == "rule" and s["change"]["rule"]["kind"] == "theme_step")
+    assert step["change"]["rule"]["into"] == "Cash"      # rising rates worry him: cash before gilts
+    watch = next(s for s in sugg if s["kind"] == "watch")
+    assert watch["ticked"] is False                      # the AI dial stays; extra lights are his choice
+    assert d["sections"] == []
+    out = builder.apply({"mode": "review", "ticked": [s["id"] for s in sugg if s["ticked"]]})
+    assert _targets() == before and out["ok"]
+    assert db.scalar("SELECT COUNT(*) FROM rules WHERE kind='theme_step' AND subject='ai'") == 1
+    assert themes.watch()["legacy"] is True              # unticked, so untouched
+    why = db.one("SELECT why, breakers FROM sleeves WHERE name='Technology & AI'")
+    assert why["why"] == "The biggest change in my lifetime." and "capex" in why["breakers"]
+
+
+def test_answers_that_contradict_a_plan_are_suggested_but_left_unticked():
+    sample.load()
+    plan.import_plan(ALLAN)
+    builder.save_answers(dict(ALLAN_ANSWERS, avoid=["weapons"]))
+    sugg = builder.draft()["review"]["suggestions"]
+    wind = next(s for s in sugg if s["id"].startswith("avoid:"))
+    assert wind["ticked"] is False and wind["change"]["sleeve"] == "Defence" and wind["change"]["balance"] == "Global core index"
+    builder.apply({"mode": "review", "ticked": [wind["id"]]})
+    t = _targets()
+    assert t["Defence"] == 0 and t["Global core index"] == 25 and sum(t.values()) == pytest.approx(100)
+
+
+def test_a_fresh_plan_follows_the_answers_and_changes_nothing_until_used():
+    sample.load()
+    before = _targets()
+    builder.save_answers({"need_when": "under5", "draw_rate": "4", "fall": "worry", "experience": "few",
+                          "prefer": "balanced", "hands": "funds", "worries": ["inflation", "rates"],
+                          "views": {"healthcare": {"believe": 4, "action": "ride"}, "oil": {"believe": 3, "action": "dip"}}})
+    d = builder.draft("fresh")
+    sl = {s["name"]: s for s in d["plan"]["sleeves"]}
+    assert sum(s["target"] for s in sl.values()) == pytest.approx(100)
+    assert sl["Global core index"]["target"] > 30 and sl["Healthcare"]["target"] <= 6     # funds only: a big core
+    assert "Index-linked gilts" in sl and "Short-dated gilts" in sl                     # the worries' defences
+    assert any(r["kind"] == "theme_dip" and r["subject"] == "oil" for r in d["plan"]["rules"])
+    assert _targets() == before
+    builder.apply({"mode": "fresh"})
+    assert "Global core index" in _targets() and "Short-dated gilts" in _targets()
+    assert db.scalar("SELECT COUNT(*) FROM rules WHERE kind='theme_dip'") == 1
+
+
+def test_someone_near_seventy_with_a_mortgage_is_offered_both_sections():
+    builder.save_answers({"age_band": "65to74", "home": "yes", "need_when": "now"})
+    d = builder.draft()
+    assert {x["key"] for x in d["sections"]} == {"mortgage", "retirement"}
+    builder.apply({"mode": "fresh", "parts": {"sleeves": False, "rules": False, "watch": False, "plans": False},
+                   "sections": {"mortgage": True, "retirement": True}})
+    assert sections.on() == {"mortgage": True, "retirement": True}
+
+
+def test_the_written_plan_carries_the_reasons_for_each_theme():
+    builder.save_answers({"views": {"gold": {"believe": 4, "worry": 2, "action": "ride", "why": "Central banks buy it.",
+                                             "change": "Real yields above 3%."}}})
+    w = builder.written_plan()
+    cards = next(s for s in w["sections"] if s["kind"] == "cards")["lines"]
+    assert cards[0]["title"] == "Gold" and cards[0]["why"] == "Central banks buy it." and cards[0]["action"] == "Ride it"
+
+
+# ============================================================================ the parachute
+
+def _lights_turn(ref: str, fall: float):
+    from folio.market import store
+    from .test_whiskers import price_series
+    price_series(store.ref_key(ref), [100.0 + i * 0.1 for i in range(300)] + [130.0 * (1 - fall)] * 30, currency="USD")
+
+
+def test_a_parachute_step_shows_when_its_lights_turn_and_rests_once_taken():
+    from folio.engine import portfolio
+    pid = add_platform(cash=1000.0)
+    add_position(pid, "SGLN", exchange="LSE", name="iShares Physical Gold ETC", broker_value=9000.0, valued_at=db.now())
+    plan.import_plan({"whiskers_plan": 2, "sleeves": [{"name": "Gold", "target": 90, "theme": "gold"},
+                                                      {"name": "Cash", "target": 10, "is_cash": True}],
+                      "rules": [{"kind": "theme_step", "subject": "gold", "trigger": 2, "target": 33, "sleeve": "Gold",
+                                 "into": "Cash", "note": "Parachute: when 2 of gold's 3 lights are red, move a third into Cash."}]})
+    db.execute("UPDATE instruments SET sleeve_id=(SELECT id FROM sleeves WHERE name='Gold')")
+    pos = portfolio.positions()
+    tot = portfolio.totals(pos)
+    calm = [s for s in rules.rule_status(pos, tot) if s["rule"]["kind"] == "theme_step"][0]
+    assert calm["level"] in ("none", "green")
+    _lights_turn("GOLD", 0.35)                                # a bear market and a broken trend
+    st = [s for s in rules.rule_status(pos, tot) if s["rule"]["kind"] == "theme_step"][0]
+    assert st["level"] == "red" and st["now"] >= 2 and st["move"] == pytest.approx(3000, rel=0.05)
+    warns = [w for w in rules.evaluate(pos, tot, {"sleeves": [], "targets_add_up": True}) if w["kind"] == "step"]
+    assert warns and "the step you agreed applies" in warns[0]["title"] and "Cash" in warns[0]["detail"]
+    rules.mark_done(st["rule"]["id"])
+    assert not [w for w in rules.evaluate(pos, tot, {"sleeves": [], "targets_add_up": True}) if w["kind"] == "step"]
+    _lights_turn("GOLD", -0.05)                               # recovered: the step re-arms
+    rules.rule_status(pos, tot)
+    assert str(st["rule"]["id"]) not in rules.steps_done()
+
+
+def test_a_buying_point_shows_after_the_fall_the_person_was_waiting_for():
+    from folio.engine import portfolio
+    pid = add_platform(cash=5000.0)
+    add_position(pid, "SHEL", exchange="LSE", name="Shell", broker_value=5000.0, valued_at=db.now())
+    plan.import_plan({"whiskers_plan": 2, "sleeves": [{"name": "Energy", "target": 50, "theme": "oil"},
+                                                      {"name": "Cash", "target": 50, "is_cash": True}],
+                      "rules": [{"kind": "theme_dip", "subject": "oil", "trigger": 30, "target": 5, "sleeve": "Cash",
+                                 "into": "Energy"}]})
+    pos = portfolio.positions()
+    tot = portfolio.totals(pos)
+    _lights_turn("ENERGY", 0.40)
+    st = [s for s in rules.rule_status(pos, tot) if s["rule"]["kind"] == "theme_dip"][0]
+    assert st["level"] == "amber" and st["now"] >= 30 and st["move"] == pytest.approx(500)
+
+
+def test_any_one_company_is_trimmed_once_it_passes_the_limit():
+    from folio.engine import portfolio
+    pid = add_platform(cash=0.0)
+    add_position(pid, "NVDA", name="NVIDIA", broker_value=1500.0, valued_at=db.now())
+    add_position(pid, "VWRP", exchange="LSE", name="Vanguard FTSE All-World (Acc)", broker_value=8500.0, valued_at=db.now())
+    plan.import_plan({"whiskers_plan": 2, "rules": [{"kind": "any_company_cap", "trigger": 10, "target": 8, "basis": "direct"}]})
+    pos = portfolio.positions()
+    tot = portfolio.totals(pos)
+    warns = [w for w in rules.evaluate(pos, tot, {"sleeves": [], "targets_add_up": True}) if w["kind"] == "any_company_cap"]
+    assert len(warns) == 1 and warns[0]["level"] == "red" and "NVIDIA" in warns[0]["title"]
+    assert "£700" in warns[0]["detail"]                       # 15% back to 8% of £10,000
+
+
+def test_plan_files_carry_reasons_and_steps_both_ways():
+    plan.import_plan({"whiskers_plan": 2, "replace_sleeves": True, "sleeves": [
+        {"name": "Core", "target": 70}, {"name": "Technology & AI", "target": 25, "theme": "ai", "why": "My reason.",
+                                          "change": "My breaker."}, {"name": "Cash", "target": 5, "is_cash": True}],
+        "rules": [{"kind": "theme_step", "subject": "ai", "trigger": 2, "target": 33, "sleeve": "Technology & AI", "into": "Cash"}]})
+    out = plan.export_plan()
+    tech = next(s for s in out["sleeves"] if s["name"] == "Technology & AI")
+    assert tech["why"] == "My reason." and tech["change"] == "My breaker." and tech["theme"] == "ai"
+    step = next(r for r in out["rules"] if r["kind"] == "theme_step")
+    assert step["sleeve"] == "Technology & AI" and step["into"] == "Cash"
+    with pytest.raises(plan.PlanError):
+        plan.import_plan({"whiskers_plan": 2, "rules": [{"kind": "theme_step", "subject": "ai", "trigger": 2,
+                                                         "sleeve": "Technology & AI", "into": "Nowhere"}]})
+    plan.import_plan({"whiskers_plan": 2, "sleeves": [{"name": "Core", "target": 70}]})
+    assert db.one("SELECT why FROM sleeves WHERE name='Technology & AI'")["why"] == "My reason."   # kept
+
+
+# ============================================================================ the brief and the file that comes back
+
+def test_the_brief_has_what_claude_needs_and_amounts_only_when_asked():
+    sample.load()
+    builder.save_answers(ALLAN_ANSWERS)
+    b = builder.brief()
+    for part in ("## What to send back", "### The plan file", "## Their answers", "## Their views, in their own words",
+                 "## What they hold", "## Their current plan", "## The X-Ray", "## Theme keys"):
+        assert part in b, part
+    assert "The biggest change in my lifetime." in b and "Ride it, with a parachute" in b
+    assert "£" not in b.split("## What they hold")[1].split("## Their current plan")[0]
+    assert "£" in builder.brief(amounts=True).split("## What they hold")[1].split("## Their current plan")[0]
+
+
+def test_a_returned_plan_is_checked_before_anything_changes():
+    sample.load()
+    builder.save_answers(ALLAN_ANSWERS)
+    before = _targets()
+    bad = builder.check_plan(b'{"whiskers_plan": 2, "replace_sleeves": true, "sleeves": [{"name": "A", "target": 60}]}')
+    assert not bad["ok"] and any("60%" in e for e in bad["errors"]) and bad["token"] is None
+    assert builder.check_plan(b"not a plan at all")["ok"] is False
+    reply = ("Here is your plan:\n```json\n" + json.dumps(dict(ALLAN, whiskers_plan=2)) + "\n```\nAnd why.").encode()
+    good = builder.check_plan(reply)
+    assert good["ok"] and good["token"]
+    assert any("parachute" in w for w in good["warnings"])       # he asked for a parachute; the file has none
+    assert any(x["change"] == "new" for x in good["diff"]["sleeves"])
+    assert _targets() == before                                  # checking changes nothing
+    with pytest.raises(ValueError):
+        builder.use_checked("not-the-token")
+    builder.use_checked(good["token"])
+    assert _targets()["Technology & AI"] == 23 and sum(_targets().values()) == pytest.approx(100)
+
+
+def test_a_step_taken_can_move_the_targets_too(server):
+    plan.import_plan({"whiskers_plan": 2, "replace_sleeves": True, "sleeves": [
+        {"name": "Technology & AI", "target": 30}, {"name": "Core", "target": 60}, {"name": "Cash", "target": 10, "is_cash": True}],
+        "rules": [{"kind": "theme_step", "subject": "ai", "trigger": 2, "target": 33, "sleeve": "Technology & AI", "into": "Cash"}]})
+    rid = db.scalar("SELECT id FROM rules WHERE kind='theme_step'")
+    req = urllib.request.Request(f"http://127.0.0.1:{server}/api/rules/{rid}/done", method="POST",
+                                 data=json.dumps({"targets": True}).encode(), headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        out = json.loads(r.read())
+    assert out["moved"] == {"points": 10.0, "from": "Technology & AI", "to": "Cash"}
+    assert _targets() == {"Technology & AI": 20, "Core": 60, "Cash": 20}
+    assert str(rid) in rules.steps_done()

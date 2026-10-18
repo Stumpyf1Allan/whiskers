@@ -22,10 +22,13 @@ ACWI_SOURCE = "MSCI ACWI factsheet, 30 September 2026"
 
 #: MSCI ACWI, 30 Sep 2026. AI-linked: Nvidia 5.11, Microsoft 3.52, Amazon 2.35, Alphabet
 #: (both classes) 3.52, TSMC 1.87, Meta 1.55, Broadcom 1.55, Micron 1.17 = 20.6%.
+#: Industrials and consumer staples are typical recent sector weights (about 10.5% and 5.5%)
+#: rather than figures from that factsheet: approximate, like every default here.
 GLOBAL = {"ai": 20.6, "healthcare": 8.4, "financials": 16.2, "oil": 4.0, "metals": 3.5,
-          "property": 3.7, "uk": 3.0}
-#: An S&P 500 fund: the same companies' weights rescaled to the US's 64.2% of ACWI.
-US500 = {"ai": 29.2}
+          "property": 3.7, "uk": 3.0, "industrials": 10.5, "consumer": 5.5}
+#: An S&P 500 fund: the same companies' weights rescaled to the US's 64.2% of ACWI; its
+#: industrials and staples are typical recent weights too.
+US500 = {"ai": 29.2, "industrials": 8.0, "consumer": 5.5}
 
 # symbol: (asset class, typical yearly charge %, duration in years, theme shares, label)
 KNOWN: dict[str, tuple] = {
@@ -82,6 +85,10 @@ COMPANIES = {
     "financials": ["HSBA", "LLOY", "BARC", "NWG", "JPM", "BAC", "V", "MA", "BRK-B", "BRK.B",
                    "GS", "MS", "LSEG", "STAN"],
     "property": ["LAND", "BLND", "SGRO", "O", "PLD", "AMT"],
+    "industrials": ["XPO", "CAT", "DE", "HON", "GE", "UNP", "ETN", "UPS", "FDX", "MMM", "SIE", "ABBN", "RTO",
+                    "WEIR", "IMI", "SMIN", "EXPN", "ODFL", "CSX", "WAB"],
+    "consumer": ["DGE", "ULVR", "PG", "KO", "PEP", "MCD", "COST", "WMT", "TSCO", "ABF", "RKT", "NESN", "CPG",
+                 "SBRY", "MDLZ", "CL", "KMB", "BATS", "IMB", "PM", "MO"],
 }
 _COMPANY_THEME = {sym: theme for theme, syms in COMPANIES.items() for sym in syms}
 

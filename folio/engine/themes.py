@@ -93,6 +93,22 @@ LIBRARY: dict[str, dict] = {
         "calm": "The oil price and energy companies are holding their trends.",
         "sleeve_words": ["energy", "oil"],
     },
+    # Before metals, so a sleeve called "Industrials & Materials" is read as industrials.
+    "industrials": {
+        "label": "Industrials", "title": "Industrial companies", "short": "industrials",
+        "about": "Machinery, transport, freight, building and the robots in factories: the business cycle in "
+                 "company form.",
+        "lights": [
+            _trend("ind_trend", "Industrial companies", "INDUSTRIALS", "US industrials against their 200-day average",
+                   TREND_WHY),
+            _fall("ind_fall", "Industrials: fall from high", "INDUSTRIALS", 0.10, 0.20,
+                  "10% is a correction, 20% a bear market",
+                  "Industrials fall early when orders dry up, so this is a read on the economy as well."),
+        ],
+        "series": ["INDUSTRIALS"], "scenario_ref": "INDUSTRIALS",
+        "calm": "Industrial companies are holding their trend.",
+        "sleeve_words": ["industr", "freight", "transport", "robot"],
+    },
     "metals": {
         "label": "Industrial metals and miners", "title": "Metals and miners", "short": "metals",
         "about": "Copper, iron ore and the mining companies that dig them up.",
@@ -230,6 +246,37 @@ LIBRARY: dict[str, dict] = {
         "calm": "Smaller companies are holding their trend.",
         "sleeve_words": ["small"],
     },
+    "consumer": {
+        "label": "Consumer brands", "title": "Consumer brands", "short": "consumer brands",
+        "about": "Food, drink and household names that people keep buying whatever the economy does.",
+        "lights": [
+            _trend("staples_trend", "Consumer staples", "STAPLES", "US consumer staples against their 200-day average",
+                   TREND_WHY),
+            _fall("staples_fall", "Consumer staples: fall from high", "STAPLES", 0.10, 0.20,
+                  "10% is a correction, 20% a bear market",
+                  "Staples usually fall less than the market; a deep fall here means even the steady names are "
+                  "being sold."),
+        ],
+        "series": ["STAPLES"], "scenario_ref": "STAPLES",
+        "calm": "Consumer brands are holding their trend.",
+        "sleeve_words": ["consumer", "staple", "brand"],
+    },
+    "speculative": {
+        "label": "Speculative growth", "title": "Speculative growth", "short": "speculative shares",
+        "about": "Young companies valued on what they might become, many not yet profitable: the first to "
+                 "soar when money is easy and the first to fall when it isn't.",
+        "lights": [
+            _trend("spec_trend", "Speculative growth shares", "SPECGROWTH",
+                   "ARK Innovation against its 200-day average", TREND_WHY),
+            _fall("spec_fall", "Speculative growth: fall from high", "SPECGROWTH", 0.20, 0.40,
+                  "These swing hard, so the bands are wide",
+                  "ARK Innovation, the best-known basket of speculative growth companies, as a read on how much "
+                  "appetite there is for them. It is not what you hold."),
+        ],
+        "series": ["SPECGROWTH"], "scenario_ref": "SPECGROWTH",
+        "calm": "Appetite for speculative growth shares is holding up.",
+        "sleeve_words": ["speculat", "moonshot", "small bet", "venture", "punt"],
+    },
     "rand": {
         "label": "The rand", "title": "The rand", "short": "rand",
         "about": "Money held in South African rand.",
@@ -275,6 +322,27 @@ SIGNALS: dict[str, list[dict]] = {
         {"key": "brent_low", "title": "Brent crude below", "group": "oil", "kind": "auto", "ref": "BRENT",
          "op": "<", "threshold": 60.0, "unit": "$",
          "means": "Producers' profits and dividends come under pressure."},
+    ],
+    "industrials": [
+        {"key": "ind_fall_20", "title": "Industrials below their high", "group": "industrials", "kind": "auto",
+         "ref": "INDUSTRIALS", "measure": "drawdown", "op": ">", "threshold": 20.0, "unit": "%",
+         "means": "A bear market in industrial companies: orders are drying up."},
+        {"key": "ism_below_50", "title": "US factory survey (ISM PMI) below 50", "group": "industrials",
+         "kind": "manual", "op": ">=", "threshold": 1, "unit": "", "choices": ["Yes"],
+         "means": "Below 50, factories are shrinking. Tick after each monthly release."},
+    ],
+    "consumer": [
+        {"key": "staples_fall_20", "title": "Consumer staples below their high", "group": "consumer", "kind": "auto",
+         "ref": "STAPLES", "measure": "drawdown", "op": ">", "threshold": 20.0, "unit": "%",
+         "means": "Even the steady names are in a bear market."},
+    ],
+    "speculative": [
+        {"key": "spec_fall_40", "title": "Speculative growth below its high", "group": "speculative", "kind": "auto",
+         "ref": "SPECGROWTH", "measure": "drawdown", "op": ">", "threshold": 40.0, "unit": "%",
+         "means": "Appetite for speculative companies has gone: they can fall much further from here."},
+        {"key": "spec_hy", "title": "Junk-bond spread above", "group": "speculative", "kind": "auto",
+         "ref": "HYOAS", "op": ">", "threshold": 5.0, "unit": "%",
+         "means": "Lenders are getting nervous, and companies that aren't yet profitable need lenders most."},
     ],
     "metals": [
         {"key": "copper_fall_20", "title": "Copper below its high", "group": "metals", "kind": "auto",

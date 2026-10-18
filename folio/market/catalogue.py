@@ -259,6 +259,13 @@ REFERENCE: dict[str, dict] = {
         sources=[("yahoo", "GBPZAR=X")], sleeve_words=[],
         blurb="How many South African rand one pound buys.",
         why="When it rises, rand held in South Africa is worth fewer pounds."),
+    "SPECGROWTH": dict(
+        label="Speculative growth (ARK Innovation)", unit="$", group="sectors", hidden=True, on_demand=True,
+        sources=[("yahoo", "ARKK")], sleeve_words=["speculat"],
+        blurb="ARK Innovation ETF: the best-known basket of young, fast-growing and often unprofitable "
+              "companies.",
+        why="A read on appetite for speculative growth: it rises furthest when money is easy and falls "
+            "furthest when it isn't."),
     "BTC": dict(
         label="Bitcoin (in £)", unit="£", group="markets", hidden=True, on_demand=True,
         sources=[("yahoo", "BTC-GBP")], sleeve_words=["crypto"],

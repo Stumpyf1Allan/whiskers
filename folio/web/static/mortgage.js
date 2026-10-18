@@ -1,4 +1,5 @@
-/* Whiskers: the Mortgage tab, brought from Mittens & Pence.
+/* Whiskers: the Mortgage section, brought from Mittens & Pence. Off unless switched on in
+   Settings, Sections; off, it shows nothing and counts towards nothing.
 
    A mortgage balance alone answers nothing. The four things worth knowing are the split of
    each payment between interest and capital, the date the fixed rate ends, what an
@@ -7,7 +8,7 @@
    figure as today's. */
 'use strict';
 
-VIEWS.mortgage = { title: 'Mortgage', sub: 'The balance running down, when the fixed rate ends, and what paying more would save.', render: vMortgage };
+VIEWS.mortgage = { title: 'Mortgage', section: 'mortgage', sub: 'The balance running down, when the fixed rate ends, and what paying more would save.', render: vMortgage };
 
 const monthYear = iso => { if (!iso) return '—'; const [y, m] = String(iso).slice(0, 10).split('-').map(Number); return `${MONTHS[m - 1]} ${y}`; };
 const KIND_WORD = { repayment: 'Repayment', interest_only: 'Interest only', part_and_part: 'Part and part' };
@@ -21,7 +22,7 @@ async function vMortgage(el) {
       <p class="lede">Only the lender and the balance are needed to start. Every extra figure unlocks something: a rate and a payment give the split between interest and capital and the date it clears; the date the fixed rate ends gives a warning months before it does; the home’s value gives your equity.</p>
       <p class="small" style="max-width:75ch">Most of it is on the yearly statement, or in the lender’s app: the balance, the rate, the monthly payment, and the date the deal ends.</p>
       <div class="row" style="margin-top:12px"><button class="btn primary" data-act="mort-new">Add your mortgage</button></div></section>
-      <p class="note">No mortgage? Switch this tab off in Settings.</p></div>`;
+      <p class="note">No mortgage? Switch this section off in Settings, Sections.</p></div>`;
     return;
   }
   const details = await Promise.all(d.items.map(s => api(`/api/mortgages/${s.id}`).catch(() => null)));
@@ -49,7 +50,7 @@ function mortgagePanel(s, d, stopAge, dob) {
     vlines: [s.fixed_until ? { at: s.fixed_until, label: 'rate ends', color: 'var(--amber)' } : null,
              stopYear ? { at: `${stopYear}-06-30`, label: 'you stop work', color: 'var(--cyan)' } : null].filter(Boolean),
   }, 220) : '<p class="small muted">Add a rate and a monthly payment and the run-down appears here.</p>';
-  // Where each year's payments go: interest against capital, the reason the tab exists.
+  // Where each year's payments go: interest against capital, the reason the section exists.
   const byYear = {};
   for (const r of (d && d.schedule) || []) {
     const y = r.on.slice(0, 4);
@@ -230,3 +231,56 @@ ACTS['mort-del'] = async b => {
   closeModal();
   render();
 };
+
+// ---------------------------------------------------------------------------- your home and other assets
+
+function assetForm(a) {
+  a = a || {};
+  openModal({ title: a.id ? `Change ${a.name}` : 'Something you own', body: `<div class="form-grid">
+      <label class="field">Name<input type="text" id="as-name" value="${esc(a.name || '')}" placeholder="Home"></label>
+      <label class="field">Kind<select id="as-kind">${[['property', 'Property'], ['vehicle', 'A car or other vehicle'], ['other', 'Something else']].map(([k, l]) => `<option value="${k}" ${(a.kind || 'property') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label class="field">What it’s worth<input type="number" id="as-value" step="1000" min="0" value="${known(a.value) ? a.value : ''}"><span class="help">A rough figure is fine: an online valuation, or what similar homes nearby sold for.</span></label>
+      <label class="field">Currency<select id="as-ccy">${['GBP', 'ZAR', 'EUR', 'USD'].map(c => `<option ${(a.currency || 'GBP') === c ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+      <label class="full row small"><input type="checkbox" id="as-home" ${a.is_home || (!a.id && (a.kind || 'property') === 'property') ? 'checked' : ''}> This is my main home <span class="muted">(for inheritance tax’s residence allowance)</span></label>
+      <label class="field full">Notes (optional)<input type="text" id="as-notes" value="${esc(a.notes || '')}"></label>
+    </div>`,
+    foot: `${a.id ? `<button class="btn ghost danger" data-act="asset-del" data-id="${a.id}" data-name="${esc(a.name)}">Remove</button>` : ''}<button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="asset-save" data-id="${a.id || ''}">Save</button>` });
+}
+ACTS['asset-add'] = () => assetForm(null);
+ACTS['asset-edit'] = async b => {
+  const d = await api('/api/assets');
+  assetForm(d.items.find(x => x.id === +b.dataset.id));
+};
+ACTS['asset-save'] = async b => {
+  const body = { name: $('#as-name').value, kind: $('#as-kind').value, value: $('#as-value').value,
+    currency: $('#as-ccy').value, is_home: $('#as-home').checked, notes: $('#as-notes').value };
+  await busy(b, async () => {
+    if (b.dataset.id) await api(`/api/assets/${b.dataset.id}`, { method: 'PATCH', body });
+    else await api('/api/assets', { method: 'POST', body });
+    closeModal();
+    toast('Saved.');
+    render();
+  });
+};
+ACTS['asset-del'] = async b => {
+  if (!await confirmBox(`Remove ${b.dataset.name}?`, 'It comes off what you own. A mortgage linked to it keeps its own figure for the property, if it has one.', 'Remove', true)) return;
+  await api(`/api/assets/${b.dataset.id}`, { method: 'DELETE' }).catch(e => toast(e.message, true));
+  render();
+};
+
+// Only while a section is on: with both off there is no net worth for them to count in.
+SETTINGS_PANELS.middle.push(() => !SECTIONS.some(sectionOn) ? '' : `<section class="panel" id="assets-panel"><div class="spread"><h2>Your home and other things you own</h2><button class="btn" data-act="asset-add">Add one</button></div>
+  <p class="lede">Counted in your net worth on the Overview. A mortgage can take the home’s value from here, so there is one figure for the house, not two that can disagree.</p>
+  <div id="assets-list"><div class="spinner"></div></div></section>`);
+document.addEventListener('whiskers:rendered', async () => {
+  const box = $('#assets-list');
+  if (!box) return;
+  try {
+    const d = await api('/api/assets');
+    box.innerHTML = d.items.length ? `<table class="small"><tbody>${d.items.map(a => `<tr><td><b>${esc(a.name)}</b>${a.is_home ? ' <span class="chip">main home</span>' : ''}<div class="tiny muted">${esc(d.kinds[a.kind] || a.kind)}${a.valued_on ? `, valued ${fmtDate(a.valued_on)}` : ''}</div></td>
+      <td class="r">${known(a.value) ? (a.currency && a.currency !== 'GBP' ? `<span class="pv">${esc(a.currency)} ${Math.round(a.value).toLocaleString('en-GB')}</span>` : money(a.value, { dp: 0 })) : '<span class="muted">no value</span>'}</td>
+      <td class="r"><button class="btn small ghost" data-act="asset-edit" data-id="${a.id}">Change</button></td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">Nothing yet.</p>';
+    wire(box);
+  } catch (e) { box.innerHTML = `<p class="warnline">${esc(e.message)}</p>`; }
+});

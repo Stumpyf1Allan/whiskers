@@ -132,8 +132,6 @@ def next_step(institution_id: str) -> dict:
     csv = next((m for m in methods if m["method"] == "csv"), None)
     profile = (csv or {}).get("profile")
     readable = becomes == "platform" and profile in INVESTMENT_PROFILES
-    if becomes == "bank" and profile and config.settings.get("budget_on"):
-        readable = True
     name = inst["name"]
     if api:
         route = "connect"
@@ -154,8 +152,7 @@ def next_step(institution_id: str) -> dict:
                    f"the layout and remembers it. Importing an overlapping file is safe.")
     else:
         route = "type"
-        summary = {"bank": f"Type in the balance whenever it changes. (Turning on the Budget tab adds "
-                           f"statement imports for {name}.)",
+        summary = {"bank": "Type in the balance whenever it changes.",
                    "card": "Type in what you owe whenever it changes.",
                    "pension": "Type in the value from its yearly statement (or the pension a year it promises).",
                    "property": "Type in what it's worth; update it when you have a valuation.",

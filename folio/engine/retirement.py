@@ -22,7 +22,7 @@ from __future__ import annotations
 import copy
 import datetime as dt
 
-from .. import db
+from .. import config, db
 from ..market import store
 from . import classify, mortgage as mort, portfolio, statepension, uktax, ukrules as R
 
@@ -289,7 +289,9 @@ def gather(s: dict | None = None) -> dict:
                     "growth": sipp_mix["real"], "contrib": 0.0, "start_age": None, "take": "drawdown",
                     "nominee": None})
     mortgages = []
-    for m in mort.all_mortgages():
+    # A section that is off counts towards nothing: a mortgage kept on file while the
+    # Mortgage section is switched off doesn't come out of the retirement plan either.
+    for m in (mort.all_mortgages() if config.settings.get("show_mortgage") else []):
         sm = mort.summarise(m)
         mortgages.append({"record": m, "summary": sm})
     assets = db.rows("SELECT * FROM assets")

@@ -15,7 +15,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const S = { boot: null, view: 'overall', tab: 'overall', dots: {}, period: { history: 1825, holding: 365, compare: 365 },
+const S = { boot: null, view: 'overview', dots: {}, period: { history: 1825, holding: 365, compare: 365 },
             histMode: 'backdated', compare: ['WORLD', 'NDX', 'FTSE100'], refreshTimer: null,
             lastFinished: null, holdingsFilter: { q: '', platform: '' } };
 
@@ -94,7 +94,8 @@ function fmtDate(iso) {
 }
 function ago(iso) {
   if (!iso) return 'never';
-  const t = Date.parse(String(iso).replace(' ', 'T'));
+  // A number is seconds since 1970 (the update check keeps its times that way).
+  const t = typeof iso === 'number' ? iso * 1000 : Date.parse(String(iso).replace(' ', 'T'));
   if (Number.isNaN(t)) return fmtDate(iso);
   const s = (Date.now() - t) / 1000;
   if (s < 90) return 'just now';
@@ -107,6 +108,8 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
 // A title inside a sentence: "The AI trade" becomes "the AI trade"; "UK companies" stays.
 const lowerFirst = t => { t = String(t || ''); const w = t.split(' ')[0]; return w.length > 1 && w === w.toUpperCase() ? t : t.charAt(0).toLowerCase() + t.slice(1); };
 const compactMoney = v => '\u00a3' + (Number.isInteger(v) ? (Math.abs(v) >= 1000 ? Charts.compact(v) : String(v)) : Charts.compact(v));
+// A rule's note without the word the builder files it under, first letter up again.
+const ruleNote = n => { const t = String(n || '').replace(/^(Parachute|Waiting for a fall): /, ''); return t.charAt(0).toUpperCase() + t.slice(1); };
 const colourOf = level => ({ red: 'var(--red)', amber: 'var(--amber)', info: 'var(--cyan)',
   green: 'var(--green)', ok: 'var(--green)' }[level] || 'var(--grey)');
 
@@ -120,68 +123,48 @@ const ICONS = {
   markets: '<path d="M4 4v16h16"/><path d="M7.5 15l3.5-4 3 2.5 5-6"/>',
   activity: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>',
   settings: '<path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="var(--panel)"/><circle cx="15" cy="12" r="2" fill="var(--panel)"/><circle cx="8" cy="17" r="2" fill="var(--panel)"/>',
-  overall: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
-  investments: '<path d="M4 19h16"/><path d="M6 15l4-4 3 3 5-6"/><path d="M15 8h3v3"/>',
   plan: '<path d="M7 3.5h8l3 3V20a.5.5 0 0 1-.5.5h-10A.5.5 0 0 1 7 20z"/><path d="M10 10h5M10 13.5h5M10 17h3"/>',
   import: '<path d="M12 4v11"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 19.5h15"/>',
   mortgage: '<path d="M3.5 11 12 4l8.5 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/>',
   retirement: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>',
-  pensions: '<path d="M4 9h16"/><path d="M5.5 9v8M10 9v8M14 9v8M18.5 9v8"/><path d="M3.5 20h17"/><path d="M12 3.5 20 8H4z"/>',
-  statepension: '<path d="M12 3.5 4.5 7v5c0 4.5 3.2 7.6 7.5 8.5 4.3-.9 7.5-4 7.5-8.5V7z"/><path d="m9 12 2 2 4-4"/>',
-  budget: '<rect x="3.5" y="6" width="17" height="12.5" rx="2"/><path d="M3.5 10h17"/><path d="M15 14.5h2.5"/>',
-  spending: '<path d="M5 19V9M10 19V5M15 19v-7M20 19v-4"/>',
-  transactions: '<path d="M4 7h11M4 12h16M4 17h9"/><path d="m17 4 3 3-3 3"/>',
 };
 const icon = (k, size = 18) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k] || ''}</svg>`;
 
 const VIEWS = {
-  overview: { title: 'Summary', sub: 'Your investments at a glance, and anything that needs a look.', render: vOverview },
+  overview: { title: 'Overview', sub: 'Everything at a glance, and anything that needs a look.', render: vOverview },
   holdings: { title: 'Holdings', sub: 'Every holding, grouped by sleeve. Click one for its chart and settings.', render: vHoldings },
   allocation: { title: 'Allocation', sub: 'What you meant to hold against what you hold, and your own rules.', render: vAllocation },
   ai: { title: 'Market watch', sub: 'Your signals and your ladder, warning lights for markets in general and for what you watch, and what a fall would cost.', render: vAI },
   markets: { title: 'Markets', sub: 'The indices and prices behind your sleeves, and what each one tells you.', render: vMarkets },
   activity: { title: 'Activity', sub: 'Money in, dividends, trades and the ISA allowance.', render: vActivity },
-  settings: { title: 'Settings', sub: 'Tabs, platforms and accounts, your plan, rules, the statements folder, data sources and updates.', render: vSettings },
+  settings: { title: 'Settings', sub: 'Platforms and accounts, your plan, sections, the statements folder, data sources and updates.', render: vSettings },
 };
 
-// The five tabs. Each holds its own screens, which the sidebar lists; Settings belongs to
-// none of them and keeps whichever tab was open. Mortgage and Retirement can be switched
-// off, and the Budget is off until somebody wants it (and only then counts on Overall).
-const TABS = [
-  { key: 'overall', title: 'Overall', views: ['overall', 'plan'] },
-  { key: 'investments', title: 'Investments', views: ['overview', 'holdings', 'allocation', 'ai', 'markets', 'activity', 'import'] },
-  { key: 'budget', title: 'Budget', views: ['budget', 'transactions'], setting: 'budget_on' },
-  { key: 'mortgage', title: 'Mortgage', views: ['mortgage'], setting: 'show_mortgage' },
-  { key: 'retirement', title: 'Retirement', views: ['retirement', 'pensions', 'statepension'], setting: 'show_retirement' },
-];
-const tabOf = view => TABS.find(t => t.views.includes(view));
-const tabOn = t => !t.setting || !!(S.boot && S.boot.settings[t.setting]);
+// The sidebar: the seven screens, with Mortgage and Retirement after Activity for anyone
+// who has switched them on (Settings, Sections). A screen that belongs to another (Import
+// to Settings, Pensions to Retirement) lights up its parent instead of adding a line.
+const SECTIONS = ['mortgage', 'retirement'];
+const sectionOn = key => !!(S.boot && S.boot.settings[`show_${key}`]);
+function navViews() {
+  const out = ['overview', 'holdings', 'allocation', 'ai', 'markets', 'activity'];
+  for (const k of SECTIONS) if (VIEWS[k] && sectionOn(k)) out.push(k);
+  return out.concat('settings');
+}
+const navOf = view => (VIEWS[view] && VIEWS[view].parent) || view;
 
 function buildNav() {
-  const tab = TABS.find(t => t.key === S.tab) || TABS[0];
-  const tabs = TABS.filter(t => tabOn(t) || t.key === S.tab);
-  const worst = t => { const lv = t.views.map(v => S.dots[v]).filter(Boolean);
-    return lv.includes('red') ? 'red' : lv.includes('amber') ? 'amber' : null; };
-  $('#tabs').innerHTML = tabs.map(t => `<button type="button" data-tab="${t.key}" class="${t.key === tab.key && S.view !== 'settings' ? 'on' : ''}"
-      ${t.key === tab.key && S.view !== 'settings' ? 'aria-current="page"' : ''}><span class="ic">${icon(t.key === 'investments' ? 'investments' : t.views[0])}</span><span class="lbl">${t.title}</span><span class="dot" style="background:${worst(t) ? colourOf(worst(t)) : 'transparent'}"></span></button>`).join('');
-  $$('#tabs button').forEach(b => b.addEventListener('click', () => {
-    const t = TABS.find(x => x.key === b.dataset.tab);
-    go(t.key === S.tab && S.view !== 'settings' ? t.views[0] : (S.lastIn && S.lastIn[t.key]) || t.views[0]);
-  }));
-  $('#rail-title').textContent = tab.title;
-  const views = tab.views.filter(v => VIEWS[v]);
-  $('#nav').innerHTML = views.map(k =>
-    `<button type="button" data-view="${k}" class="${k === S.view ? 'on' : ''}"><span class="ic">${icon(k)}</span><span class="lbl">${VIEWS[k].navTitle || VIEWS[k].title}</span><span class="dot" data-dot="${k}" style="background:${S.dots[k] ? colourOf(S.dots[k]) : 'transparent'}"></span></button>`).join('');
+  $('#nav').innerHTML = navViews().map(k =>
+    `<button type="button" data-view="${k}" class="${k === navOf(S.view) ? 'on' : ''}"><span class="ic">${icon(k)}</span><span class="lbl">${VIEWS[k].navTitle || VIEWS[k].title}</span><span class="dot" data-dot="${k}" style="background:${S.dots[k] ? colourOf(S.dots[k]) : 'transparent'}"></span></button>`).join('');
   $$('#nav button').forEach(b => b.addEventListener('click', () => go(b.dataset.view)));
-  $('#settings-btn').classList.toggle('on', S.view === 'settings');
 }
 
 function go(view) {
-  if (!VIEWS[view]) view = 'overall';
+  if (!VIEWS[view]) view = 'overview';
+  // A section that is switched off has no screens: a link into one leads to the Overview.
+  const sec = VIEWS[view].section;
+  if (sec && !sectionOn(sec)) view = 'overview';
   if (view !== S.view) window.scrollTo({ top: 0, behavior: 'instant' });
   S.view = view;
-  const t = tabOf(view);
-  if (t) { S.tab = t.key; (S.lastIn = S.lastIn || {})[t.key] = view; }
   history.replaceState(null, '', '#' + view);
   buildNav();
   render();
@@ -191,7 +174,9 @@ let renderSeq = 0;
 async function render() {
   const seq = ++renderSeq;
   const v = VIEWS[S.view];
-  $$('#nav button').forEach(b => b.classList.toggle('on', b.dataset.view === S.view));
+  // The plan builder is a page of its own: no sidebar, no title bar, its own way back.
+  document.body.classList.toggle('fullpage', !!v.full);
+  $$('#nav button').forEach(b => b.classList.toggle('on', b.dataset.view === navOf(S.view)));
   $('#title').textContent = v.title;
   $('#subtitle').textContent = v.sub;
   const el = $('#view');
@@ -410,6 +395,7 @@ async function vOverview(el) {
   const warn = d.warnings;
   const reds = warn.filter(w => w.level === 'red').length, ambers = warn.filter(w => w.level === 'amber').length;
   setDot('overview', reds ? 'red' : ambers ? 'amber' : null);
+  for (const l of (d.sections && d.sections.lines) || []) setDot(l.key, ['red', 'amber'].includes(l.level) ? l.level : null);
   el.innerHTML = `
   <div class="stack-lg">
     <div class="figures">
@@ -422,6 +408,7 @@ async function vOverview(el) {
       <div><div class="k">Dividends, last 12 months</div><div class="v">${money(t.dividends_12m)}</div>
         <div class="s">${t.dividends_12m && t.total ? `${pct(t.dividends_12m / t.total, { dp: 2 })} of today\u2019s value` : 'None recorded yet'}</div></div>
     </div>
+    ${sectionsPanel(d.sections)}
 
     <div class="grid g-main">
       <section class="panel">
@@ -460,6 +447,23 @@ async function vOverview(el) {
   </div>`;
 }
 
+// The optional sections: net worth, counting what the switched-on sections hold, and one
+// line for each. Nothing at all while both are off.
+function sectionsPanel(x) {
+  if (!x) return '';
+  const own = Object.entries(x.own || {}).map(([k, v]) => `${k} ${moneyText(v, 0)}`).join(', ');
+  const owe = Object.entries(x.owe || {}).map(([k, v]) => `${k} ${moneyText(v, 0)}`).join(', ');
+  return `<section class="panel sections-panel"><div class="sec-grid">
+    <div class="networth"><div class="k">Net worth</div><div class="v">${money(x.net, { dp: 0 })}</div>
+      <div class="s">${known(x.month_change) ? `<span class="${signCls(x.month_change)}">${money(x.month_change, { sign: true, dp: 0 })}</span> in the last month. ` : ''}Owns ${money(x.total_own, { dp: 0 })}, owes ${money(x.total_owe, { dp: 0 })}.</div>
+      <div class="tiny muted" title="${esc(own)}${owe ? ` | Owes: ${esc(owe)}` : ''}">Counting your investments and cash${x.sections.mortgage ? ', your home and the mortgage' : ''}${x.sections.retirement ? ', and pension pots' : ''}.</div>
+      ${(x.promised || []).length ? `<div class="tiny muted">Not counted: ${x.promised.map(p => `${esc(p.name)} pays ${money(p.yearly, { dp: 0 })} a year${p.from ? ` from ${p.from}` : ''}`).join('; ')}. A promised income isn\u2019t money you could spend tomorrow.</div>` : ''}
+      ${(x.unconverted || []).length ? `<div class="tiny warnline">Left out until there\u2019s an exchange rate: ${esc(x.unconverted.join(', '))}. Press Refresh.</div>` : ''}
+    </div>
+    <div class="sec-lines">${x.lines.map(l => `<button class="sec-line" type="button" data-go="${l.go}"><span class="lvl ${l.level === 'none' ? '' : l.level}"></span><b>${esc(l.title)}</b><span class="d">${narr(l.words)}</span></button>`).join('')}</div>
+  </div></section>`;
+}
+
 const segBtn = (act, val, label, cur) => `<button type="button" class="${String(val) === String(cur) ? 'on' : ''}" data-act="${act}" data-v="${val}">${label}</button>`;
 ACTS['hist-mode'] = b => { S.histMode = b.dataset.v; render(); };
 ACTS['hist-period'] = b => { S.period.history = +b.dataset.v; render(); };
@@ -471,16 +475,9 @@ function alertRow(w) {
 }
 
 function setDot(view, level) {
-  const was = S.dots[view] || null;
   S.dots[view] = level || null;
   const d = $(`[data-dot="${view}"]`);
   if (d) d.style.background = level ? colourOf(level) : 'transparent';
-  if (was !== (level || null)) {
-    const t = tabOf(view), b = t && $(`#tabs [data-tab="${t.key}"] .dot`);
-    if (b) { const lv = t.views.map(v => S.dots[v]).filter(Boolean);
-      const w = lv.includes('red') ? 'red' : lv.includes('amber') ? 'amber' : null;
-      b.style.background = w ? colourOf(w) : 'transparent'; }
-  }
 }
 
 function sliceSince(points, days) {
@@ -621,15 +618,15 @@ function renderWelcome(el) {
   // Titles are applied by render() once it knows this screen is still the one wanted;
   // setting them here let a slow Overview rename whichever screen was opened next.
   el.dataset.title = 'Welcome';
-  el.dataset.sub = 'Three things to set up. The Overall tab has the rest: your mortgage, pensions and plan review.';
+  el.dataset.sub = 'Three things to set up, about ten minutes in all.';
   el.innerHTML = `<div class="welcome">
     <div class="steps">
       <div class="step"><div class="stack" style="gap:8px"><h3>Your plan</h3>
         ${S.boot.sleeves ? `<p><span class="chip green">Done</span> ${plural(S.boot.sleeves, 'sleeve')} set up. Change them any time in Settings.</p>` : `
-        <p class="muted">The sleeves you split your money into, and the share each should have. Answer ten questions for a starting plan, load a plan file someone made for you, or start from a simple template. Every figure can be changed later in Settings.</p>
-        <div class="row wrap"><button class="btn primary" data-go="plan">Do the plan review</button><button class="btn" data-act="plan-import">Load a plan file</button><button class="btn" data-act="starter">Start from a template</button></div>`}</div></div>
+        <p class="muted">The sleeves you split your money into, and the share each should have. The plan builder makes them from your answers and your own views; or load a plan file someone made for you, or start from a simple template. Every figure can be changed later in Settings.</p>
+        <div class="row wrap"><button class="btn primary" data-go="builder">Open the plan builder</button><button class="btn" data-act="plan-import">Load a plan file</button><button class="btn" data-act="starter">Start from a template</button></div>`}</div></div>
       <div class="step"><div class="stack" style="gap:8px"><h3>Where you invest</h3>
-        <p class="muted">Find each platform, bank or pension in the list of over 270 UK and South African firms. Whiskers says for each one how it keeps up to date: Trading 212 and Monzo connect by themselves; Freetrade, Hargreaves Lansdown, AJ Bell, interactive investor and Vanguard come in from the file they let you download; anything else is typed in.</p>
+        <p class="muted">Find each platform or bank in the list of over 270 UK and South African firms. Whiskers says for each one how it keeps up to date: Trading 212 and Monzo connect by themselves; Freetrade, Hargreaves Lansdown, AJ Bell, interactive investor and Vanguard come in from the file they let you download; anything else is typed in.</p>
         <div class="row wrap"><button class="btn primary" data-act="add-from-catalogue">Find your platform or account</button><button class="btn ghost" data-act="add-platform" data-kind="other">Type one in</button></div></div></div>
       <div class="step"><div class="stack" style="gap:8px"><h3>Sort holdings into sleeves</h3>
         <p class="muted">Whiskers suggests a sleeve for each holding. You confirm them on the Allocation screen.</p></div></div>
@@ -988,8 +985,8 @@ async function vAllocation(el) {
   const d = await api('/api/allocation');
   const v = d.view;
   if (!v.sleeves.length) {
-    el.innerHTML = `<div class="panel"><h2>No sleeves yet</h2><p class="lede">Sleeves are the parts you split your money into, each with a target share. Load a plan file, or start from the template and edit it.</p>
-      <div class="row"><button class="btn primary" data-go="plan">Do the plan review</button><button class="btn" data-act="plan-import">Load a plan file</button><button class="btn" data-act="starter">Start from a template</button></div></div>`;
+    el.innerHTML = `<div class="panel"><h2>No sleeves yet</h2><p class="lede">Sleeves are the parts you split your money into, each with a target share. The plan builder makes them from your answers; or load a plan file, or start from the template and edit it.</p>
+      <div class="row wrap"><button class="btn primary" data-go="builder">Open the plan builder</button><button class="btn" data-act="plan-import">Load a plan file</button><button class="btn" data-act="starter">Start from a template</button></div></div>`;
     return;
   }
   const statusWord = { ok: 'inside its band', amber: 'drifting', red: 'outside its band', none: 'no value yet' };
@@ -1006,7 +1003,7 @@ async function vAllocation(el) {
     const a = Math.min(r.actual, r.target), b = Math.max(r.actual, r.target);
     const col = statusCol(r.status);
     return `<div class="band-row">
-      <div class="band-name"><span class="lvl ${r.status}"></span><span title="${esc(r.name)}">${esc(r.name)}<span class="st">${statusWord[r.status] || ''}</span></span></div>
+      <div class="band-name"><span class="lvl ${r.status}"></span><span title="${esc(r.name)}${r.why ? `: ${esc(r.why)}` : ''}">${esc(r.name)}<span class="st">${statusWord[r.status] || ''}</span></span></div>
       <div class="band-track" title="Target ${r.target}%. Inside its band from ${pts(Math.max(0, r.target - r.band))} to ${pts(r.target + r.band)}.">
         <div class="axisline"></div>
         <div class="zone warn" style="left:${x(r.target - r.band)};width:${w(2 * r.band)}"></div>
@@ -1047,21 +1044,27 @@ async function vAllocation(el) {
       </div>
     </div>
     <section class="panel"><div class="spread"><h2>Your rules</h2><button class="btn" data-act="rule-add">Add a rule</button></div>
-      <p class="lede">Limits you have set for yourself: a company, a theme, or AI as a whole. Each shows where it stands against its trigger.</p>
-      ${d.rules.length ? `<div class="stack">${d.rules.map(ruleRow).join('')}</div>` : '<p class="muted">No rules yet. A common one: trim a single company back once it passes a set share of the portfolio.</p>'}
+      <p class="lede">Limits you have set for yourself: a company, a theme, or AI as a whole, and the steps you agreed for when a theme\u2019s lights turn. Each shows where it stands.</p>
+      ${d.rules.length ? `<div class="stack">${d.rules.map(r => STEP_KINDS.includes(r.kind) ? stepRow(r) : ruleRow(r)).join('')}</div>` : '<p class="muted">No rules yet. A common one: trim a single company back once it passes a set share of the portfolio.</p>'}
     </section>
     ${targetsPanel(d.holding_targets)}
     ${d.unassigned.length ? unassignedPanel(d) : ''}
   </div>`;
 }
 
+const STEP_KINDS = ['theme_step', 'theme_dip'];
 function ruleRow(r) {
-  const what = r.kind === 'company_cap' ? `${esc(r.subject)}${r.basis === 'true' ? ', counting funds' : ', held directly'}`
-    : r.kind === 'theme_cap' ? `${esc(r.subject)} theme` : 'Everything AI-linked, looked through funds';
+  const counting = r.basis === 'true' ? ', counting funds' : ', held directly';
+  const what = r.kind === 'company_cap' ? `${esc(r.subject)}${counting}`
+    : r.kind === 'any_company_cap' ? `Any one company${counting}`
+    : r.kind === 'theme_cap' ? `${esc(r.subject)} theme`
+    : r.kind === 'exposure_cap' ? `${esc(r.label || r.subject)}, looked through funds`
+    : 'Everything AI-linked, looked through funds';
   const top = Math.max(r.trigger * 1.35, (r.now || 0) * 1.1);
   const x = p => `${Math.max(0, Math.min(100, p / top * 100))}%`;
   const lvl = r.level === 'none' ? '' : r.level;
-  const detail = r.detail && r.detail.holdings ? r.detail.holdings.map(h => `${esc(h.platform)} ${money(h.value, { dp: 0 })}`).join(', ') : '';
+  const detail = r.kind === 'any_company_cap' ? (r.detail && r.detail.company ? `Biggest now: ${esc(r.detail.company)}${(r.detail.over || []).length > 1 ? `; ${r.detail.over.length} over the limit` : ''}` : 'No single companies held')
+    : r.detail && r.detail.holdings ? r.detail.holdings.map(h => `${esc(h.platform)} ${money(h.value, { dp: 0 })}`).join(', ') : '';
   return `<div class="band-row" style="grid-template-columns:minmax(160px,240px) 1fr 200px">
     <div><div class="row"><span class="lvl ${lvl}"></span><b>${what}</b></div>${r.note ? `<div class="tiny muted">${esc(r.note)}</div>` : ''}${detail ? `<div class="tiny muted">${detail}</div>` : ''}</div>
     <div class="band-track">
@@ -1075,6 +1078,51 @@ function ruleRow(r) {
       <button class="btn small ghost" data-act="rule-del" data-id="${r.id}">Remove</button></div></div>
   </div>`;
 }
+
+// A parachute step (when a theme's lights turn) or a buying point (when a theme somebody is
+// waiting on has fallen far enough): a row of lights, or a fall against its mark.
+function stepRow(r) {
+  const d = r.detail || {};
+  const lvl = r.level === 'none' ? '' : r.level;
+  const title = esc(r.title || r.subject);
+  let gauge, fig, what;
+  if (r.kind === 'theme_step') {
+    const n = d.of || 0;
+    gauge = `<div class="lights-row" title="${d.reds || 0} of ${n} red; the step applies at ${r.trigger}">${Array.from({ length: n }, (_, i) => `<i class="${i < (d.reds || 0) ? 'red' : i < (d.reds || 0) + (d.ambers || 0) ? 'amber' : ''}"></i>`).join('')}<span class="tiny muted">step at ${r.trigger} red</span></div>`;
+    fig = `<span class="fig">${d.have ? `${d.reds} of ${n}` : '\u2014'}</span> <span class="muted">red</span>`;
+    what = `Parachute: ${title}`;
+  } else {
+    const fall = r.now;
+    const top = Math.max(r.trigger * 1.25, (fall || 0) * 1.1);
+    const x = p => `${Math.max(0, Math.min(100, p / top * 100))}%`;
+    gauge = `<div class="band-track"><div class="axisline"></div><div class="act" style="left:0;width:${x(fall || 0)};background:${colourOf(lvl || 'none')}"></div><div class="tgt" style="left:${x(r.trigger)};background:var(--accent);width:3px" title="Buys at ${r.trigger}% below its high"></div></div>`;
+    fig = `<span class="fig">${known(fall) ? `${fall.toFixed(0)}%` : '\u2014'}</span> <span class="muted">below its high</span>`;
+    what = `Buying point: ${title}`;
+  }
+  const action = r.done ? `<span class="chip green">Taken ${fmtDate(r.done)}</span>`
+    : (r.level === 'red' || (r.kind === 'theme_dip' && r.level === 'amber')) ? `<button class="btn small primary" data-act="step-done" data-id="${r.id}" data-kind="${r.kind}" data-from="${esc(r.sleeve || '')}" data-into="${esc(r.into || '')}">I\u2019ve done this</button>` : '';
+  return `<div class="band-row" style="grid-template-columns:minmax(160px,240px) 1fr 200px">
+    <div><div class="row"><span class="lvl ${lvl}"></span><b>${what}</b></div>${r.note ? `<div class="tiny muted">${esc(ruleNote(r.note))}</div>` : ''}${known(r.move) && r.move > 0 ? `<div class="tiny muted">About ${money(r.move, { dp: 0 })} from ${esc(r.sleeve)} into ${esc(r.into)} at today\u2019s values</div>` : ''}</div>
+    ${gauge}
+    <div class="band-fig">${fig}<div class="tiny">${action} <button class="btn small ghost" data-act="rule-del" data-id="${r.id}">Remove</button></div></div>
+  </div>`;
+}
+ACTS['step-done'] = b => {
+  const step = b.dataset.kind === 'theme_step';
+  openModal({ title: step ? 'You\u2019ve taken the step' : 'You\u2019ve bought', body: `<p style="max-width:60ch">${step
+      ? `Whiskers marks the step as taken, and stops showing it until the lights have cleared; it applies again the next time they turn.`
+      : `Whiskers marks the buying point as used, until the fall is over.`}</p>
+    <label class="row small" style="margin-top:10px"><input type="checkbox" id="sd-targets" checked> Move the targets too, from ${esc(b.dataset.from)} to ${esc(b.dataset.into)}, so the next rebalance doesn\u2019t undo it</label>`,
+    foot: `<button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="step-done-save" data-id="${b.dataset.id}">Mark it done</button>` });
+};
+ACTS['step-done-save'] = async b => {
+  await busy(b, async () => {
+    const r = await api(`/api/rules/${b.dataset.id}/done`, { method: 'POST', body: { targets: $('#sd-targets').checked } });
+    closeModal();
+    toast(r.moved ? `Marked as done. ${r.moved.points} points moved from ${r.moved.from} to ${r.moved.to}.` : 'Marked as done.');
+    render();
+  });
+};
 
 function unassignedPanel(d) {
   const opts = sel => `<option value="">Choose a sleeve</option>` + d.sleeves.map(s => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${esc(s.name)}</option>`).join('');
@@ -1107,7 +1155,7 @@ ACTS['rule-del'] = async b => {
 };
 ACTS['rule-add'] = () => {
   openModal({ title: 'Add a rule', body: `<div class="stack">
-    <label class="field">What it limits<select id="ru-kind"><option value="company_cap">One company</option><option value="theme_cap">A theme (holdings that ride on one idea)</option><option value="ai_cap">Everything AI-linked</option></select></label>
+    <label class="field">What it limits<select id="ru-kind"><option value="company_cap">One company</option><option value="any_company_cap">Any one company</option><option value="theme_cap">A theme (holdings that ride on one idea)</option><option value="ai_cap">Everything AI-linked</option></select></label>
     <label class="field" id="ru-subject-f">Company or theme, exactly as set on the holdings<input type="text" id="ru-subject" placeholder="Alphabet"></label>
     <div class="row"><label class="field grow">Trigger: act when it passes (%)<input type="number" id="ru-trig" step="0.1" min="0.1" max="100"></label>
       <label class="field grow">Bring it back to (%, optional)<input type="number" id="ru-tgt" step="0.1" min="0" max="100"></label></div>
@@ -1115,8 +1163,8 @@ ACTS['rule-add'] = () => {
     <label class="field">A note to your future self (optional)<input type="text" id="ru-note" placeholder="Why this limit exists"></label></div>`,
     foot: `<button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="rule-save">Add the rule</button>` });
   $('#ru-kind').addEventListener('change', e => {
-    $('#ru-subject-f').hidden = e.target.value === 'ai_cap';
-    $('#ru-basis-f').hidden = e.target.value !== 'company_cap';
+    $('#ru-subject-f').hidden = ['ai_cap', 'any_company_cap'].includes(e.target.value);
+    $('#ru-basis-f').hidden = !['company_cap', 'any_company_cap'].includes(e.target.value);
   });
 };
 ACTS['rule-save'] = async b => {
@@ -1139,7 +1187,7 @@ async function vAI(el) {
   const themesWatched = (w.themes || ['ai']).filter(g => g !== 'market' && g !== 'economy');
   const gTitle = g => (m.groups[g] && m.groups[g].title) || { ai: 'The AI trade', market: 'Markets in general', economy: 'The economy and money' }[g] || g;
   // What the first slider moves: the main watch's money (the AI trade's, unless the plan
-  // review chose something else).
+  // builder chose something else).
   const te = d.theme_exposure || {};
   const mainVal = isAI ? (e.ai_value || 0) : ((te[main] || {}).value || 0);
   const mainWord = isAI ? 'AI-linked holdings' : `Holdings that ride on ${lowerFirst(w.main_label || gTitle(main))}`;
@@ -1173,9 +1221,11 @@ async function vAI(el) {
     ${themesWatched.map(g => `<h3 class="trace-group">${esc(gTitle(g))}${g === main && themesWatched.length > 1 ? ' <span class="tiny">(your main watch)</span>' : ''}</h3>
     <div class="traces">${m.lights.filter(x => x.group === g).map(trace).join('') || '<div class="trace none"><div class="words">No lights for this one yet.</div></div>'}</div>
     ${d.narratives && d.narratives[g] ? `<p class="trace-note">${narr(d.narratives[g])}</p>` : ''}`).join('')}
-    <p class="tiny" style="margin-top:14px;color:var(--mon-muted)">${w.legacy ? 'Watching the AI trade, the original watch. The plan review on the Overall tab can choose what you watch instead.' : `Watching ${themesWatched.map(g => esc(gTitle(g))).join(', ')}, chosen ${w.chosen_at ? fmtDate(w.chosen_at) : 'in the plan review'}.`} <a href="#" data-act="watch-change">Change what you watch</a></p>
+    <p class="tiny" style="margin-top:14px;color:var(--mon-muted)">${w.legacy ? 'Watching the AI trade, the original watch. The plan builder can choose what you watch from your own views instead.' : `Watching ${themesWatched.map(g => esc(gTitle(g))).join(', ')}, chosen ${w.chosen_at ? fmtDate(w.chosen_at) : 'in the plan builder'}.`} <a href="#" data-act="watch-change">Change what you watch</a></p>
     ${(d.moved || []).length ? `<p class="tiny moved"><b>Outside your watch:</b> ${d.moved.map(x => `${esc(x.title)} (${x.reds.map(r => `${esc(r.title)} red${r.since ? ` since ${fmtDate(r.since)}` : ''}`).join('; ')})`).join(', ')}. Not counted in your dial; listed so that nothing big goes unseen.</p>` : ''}
   </section>
+
+  ${stepsPanel(d.steps)}
 
   ${playbookPanels(d.playbook, d.narratives && d.narratives.signals)}
 
@@ -1264,6 +1314,30 @@ function exposureBlock(e, t, cap) {
     ${e.unknown.length ? `<p class="warnline" style="margin-top:8px">Not rated yet: ${e.unknown.slice(0, 6).map(u => `<a href="#" data-holding="${u.instrument_id}">${esc(u.name)}</a>`).join(', ')}${e.unknown.length > 6 ? ` and ${e.unknown.length - 6} more` : ''}. Set an AI share on each, or on its sleeve in Settings.</p>` : ''}`;
 }
 
+// The steps agreed in calm weather, beside the person's own reasons: when a theme's lights
+// turn, the plan written while calm and the evidence are on the same screen.
+function stepsPanel(steps) {
+  if (!steps || !steps.length) return '';
+  const card = x => {
+    const d = x.detail || {};
+    const lvl = x.done ? 'green' : x.level === 'none' ? 'none' : x.level;
+    const status = x.kind === 'theme_step'
+      ? (d.have ? `${d.reds} of ${d.of} lights red; the step applies at ${x.trigger}` : 'No readings yet')
+      : (known(x.now) ? `${x.now.toFixed(0)}% below its high; your plan buys at ${x.trigger}%` : 'No readings yet');
+    const now = x.done ? `Taken ${fmtDate(x.done)}. It applies again once ${x.kind === 'theme_step' ? 'the lights have cleared' : 'the fall is over'}.`
+      : x.level === 'red' || (x.kind === 'theme_dip' && x.level === 'amber') ? '<b>It applies now.</b>' : '';
+    return `<div class="step-card ${lvl}">
+      <div class="spread"><b>${esc(x.title)}</b><span class="chip ${lvl}">${esc(status)}</span></div>
+      <p class="small" style="margin-top:6px">${esc(ruleNote(x.note))}${known(x.move) && x.move > 0 ? ` About ${money(x.move, { dp: 0 })} at today\u2019s values.` : ''} ${now}</p>
+      ${x.why || x.change ? `<div class="thesis small">${x.why ? `<div><span class="muted">Why you hold it:</span> ${esc(x.why)}</div>` : ''}${x.change ? `<div><span class="muted">What would change your mind:</span> ${esc(x.change)}</div>` : ''}</div>` : ''}
+      ${!x.done && (x.level === 'red' || (x.kind === 'theme_dip' && x.level === 'amber')) ? `<div class="row" style="margin-top:8px"><button class="btn small primary" data-act="step-done" data-id="${x.id}" data-kind="${x.kind}" data-from="${esc(x.sleeve || '')}" data-into="${esc(x.into || '')}">I\u2019ve done this</button></div>` : ''}
+    </div>`;
+  };
+  return `<section class="panel"><div class="spread"><h2>Your agreed steps</h2><span class="muted small">decided in calm weather</span></div>
+    <p class="lede">From the plan builder: what you agreed to do when a theme\u2019s warning lights turn, or when something you are waiting to buy has fallen far enough. Whiskers never trades; it tells you when a step applies.</p>
+    <div class="grid g2">${steps.map(card).join('')}</div></section>`;
+}
+
 // The same picture as the AI exposure, for any other theme being watched.
 function themeExposureBlock(g, x, t) {
   if (!t.total) return '';
@@ -1328,7 +1402,7 @@ const GROUPS = [['ai', 'The AI trade'], ['markets', 'Stock markets'], ['sectors'
                 ['commodities', 'Commodities'], ['rates', 'Rates and the pound'], ['stress', 'Stress gauges']];
 
 async function vMarkets(el) {
-  const [d, val] = await Promise.all([api('/api/markets'), api('/api/valuations').catch(() => null)]);
+  const d = await api('/api/markets');
   const keys = S.compare.filter(k => d.series.some(s => s.key === k));
   const cmp = keys.length ? await api(`/api/series?keys=${keys.map(k => 'REF:' + k).join(',')}&days=${S.period.compare}&rebase=1`) : { series: [] };
   const palette = ['var(--accent)', '#b35c00', '#7b3fc4', '#2f5bd3', '#c0392b', '#3d7d2c'];
@@ -1359,39 +1433,9 @@ async function vMarkets(el) {
         </div>`;
       }).join('')}</div></section>`;
     }).join('')}
-    ${val ? valuationsPanel(val) : ''}
     <p class="note">Prices come from Yahoo Finance\u2019s public charts, the Federal Reserve Bank of St. Louis (FRED) and, for UK consumer prices, the Office for National Statistics. They can be delayed, and Yahoo\u2019s service is unofficial, so a figure here can occasionally be missing or late.</p>
   </div>`;
 }
-// Valuations with no free daily feed, typed in by hand with their dates (engine/valuations.py).
-function valuationsPanel(v) {
-  const fmtV = (f, x) => `${x.value}${f.unit === '%' ? '%' : '\u00d7'}`;
-  return `<section class="panel"><div class="spread"><div><h2>Valuations, typed in by hand</h2>
-      <p class="lede" style="margin:0">Measures of how dear shares are that have no free daily feed. Type them in now and then (once a month is plenty); each keeps its date. None of them times the market.</p></div>
-      <button class="btn small" data-act="val-edit">Update</button></div>
-    <div class="table-wrap" style="margin-top:10px"><table class="small"><tbody>
-      ${v.fields.map(f => { const x = v.values[f.key];
-        return `<tr><td><b>${esc(f.label)}</b><div class="tiny muted">${esc(f.about)}</div></td>
-          <td class="r" style="white-space:nowrap">${x ? `<b>${esc(fmtV(f, x))}</b><div class="tiny ${x.old ? 'warnline' : 'muted'}">${fmtDate(x.on)}${x.old ? ', old' : ''}</div>` : '<span class="muted">\u2014</span>'}</td></tr>`; }).join('')}
-    </tbody></table></div></section>`;
-}
-ACTS['val-edit'] = async () => {
-  let v;
-  try { v = await api('/api/valuations'); } catch (e) { toast(e.message, true); return; }
-  const today = new Date().toISOString().slice(0, 10);
-  openModal({ title: 'Valuations, typed in by hand', wide: true, body: `
-    <p class="small muted" style="max-width:80ch">Leave a box empty to clear it. The date is the day the figure is for.</p>
-    <div class="stack" style="margin-top:10px">${v.fields.map(f => { const x = v.values[f.key] || {};
-      return `<div class="form-grid val-row"><label class="field">${esc(f.label)}<input type="number" step="any" id="val-${f.key}" value="${esc(x.value ?? '')}" placeholder="${f.unit === '%' ? 'e.g. 4.3' : 'e.g. 22.5'}"><span class="help">Where: ${esc(f.where)}</span></label>
-        <label class="field">For the date<input type="date" id="val-on-${f.key}" value="${esc(x.on || today)}"></label>
-        <label class="field">Note (optional)<input type="text" id="val-note-${f.key}" value="${esc(x.note || '')}" maxlength="200"></label></div>`; }).join('')}</div>`,
-    foot: `<button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="val-save">Save</button>` });
-  S.valFields = v.fields.map(f => f.key);
-};
-ACTS['val-save'] = async b => {
-  const body = Object.fromEntries((S.valFields || []).map(k => [k, { value: $(`#val-${k}`).value, on: $(`#val-on-${k}`).value, note: $(`#val-note-${k}`).value }]));
-  await busy(b, async () => { await api('/api/valuations', { method: 'PUT', body }); closeModal(); toast('Saved.'); render(); });
-};
 ACTS['cmp-period'] = b => { S.period.compare = +b.dataset.v; render(); };
 ACTS['cmp-toggle'] = b => {
   const k = b.dataset.key;
@@ -1445,26 +1489,14 @@ async function vSettings(el) {
   const tsum = d.sleeves.reduce((a, x) => a + x.target, 0);
   const extra = where => (SETTINGS_PANELS[where] || []).map(f => { try { return f(d); } catch (e) { return ''; } }).join('');
   el.innerHTML = `<div class="stack-lg">
-    <section class="panel"><h2>Tabs</h2>
-      <p class="lede">Overall and Investments are always there. Switch the others on or off; a tab that is off is left out of the Overall picture too.</p>
-      <div class="checks">
-        <label><input type="checkbox" data-act="tab-toggle" data-key="show_mortgage" ${s.show_mortgage ? 'checked' : ''}><span><b>Mortgage</b><br><span class="small muted">The balance running down, the date the fixed rate ends, and what an overpayment would save.</span></span></label>
-        <label><input type="checkbox" data-act="tab-toggle" data-key="show_retirement" ${s.show_retirement ? 'checked' : ''}><span><b>Retirement</b><br><span class="small muted">Your pensions, the State Pension, and a year-by-year plan to the end of retirement.</span></span></label>
-        <label><input type="checkbox" data-act="tab-toggle" data-key="budget_on" ${s.budget_on ? 'checked' : ''}><span><b>Budget</b><br><span class="small muted">Bank statements, spending by category and monthly budgets. Off unless you want it; only counted on Overall when it is on.</span></span></label>
-      </div>
-    </section>
-    <section class="panel"><h2>Text size</h2>
-      <p class="lede">Larger text is easier to read; charts keep their size. On a computer, Ctrl and + also zooms the whole window.</p>
-      <div class="row wrap" role="radiogroup" aria-label="Text size">${[['normal', 'Normal'], ['larger', 'Larger'], ['largest', 'Largest']].map(([k, l]) => `<label class="row small"><input type="radio" name="text-size" data-act="text-size" value="${k}" ${(s.text_size || 'normal') === k ? 'checked' : ''}> ${l}</label>`).join('')}</div>
-    </section>
     ${extra('top')}
     <section class="panel"><div class="spread"><h2>Platforms</h2><div class="row wrap"><button class="btn primary" data-act="add-from-catalogue">Find your platform or account</button><button class="btn" data-act="add-platform" data-kind="trading212">Add Trading 212</button><button class="btn" data-act="add-platform" data-kind="freetrade">Add Freetrade</button><button class="btn ghost" data-act="add-platform" data-kind="other">Type one in</button></div></div>
       <p class="lede">Each platform is checked against the protection limit on its own, because FSCS protection is per firm.</p>
       <div class="stack">${d.platforms.some(p => p.kind === 'platform') ? d.platforms.filter(p => p.kind === 'platform').map(platformRow).join('<hr class="soft">') : '<p class="muted">None yet.</p>'}</div>
     </section>
 
-    <section class="panel"><div class="spread"><h2>Your plan</h2><div class="row"><button class="btn" data-go="plan">Do the plan review</button><button class="btn" data-act="plan-import">Load a plan file</button><button class="btn" data-act="plan-export">Save a copy of your plan</button></div></div>
-      ${d.plan_loaded ? `<p class="note">Plan last set ${fmtDate(d.plan_loaded.at)}.</p>` : '<p class="small muted">The plan review on the Overall tab builds your sleeves, targets, rules and watch from your answers. A plan file sets them in one go instead.</p>'}
+    <section class="panel" id="your-plan"><div class="spread"><h2>Your plan</h2><div class="row wrap"><button class="btn primary" data-go="builder">Open the plan builder</button><button class="btn" data-act="plan-import">Load a plan file</button><button class="btn" data-act="plan-export">Save a copy of your plan</button></div></div>
+      <p class="small muted" style="max-width:80ch;margin:2px 0 10px">The plan builder asks about you, risk, how hands-on you want to be and your view on each theme, in your own words, then reviews this plan against your answers, or builds one. It can also make a brief for Claude and check the plan file that comes back.${d.plan_loaded ? ` Plan last set ${fmtDate(d.plan_loaded.at)}.` : ''}</p>
       <p class="lede">Sleeves and their targets. Targets must add up to 100. A blank band uses the 5/25 rule; the AI share is the default for holdings in that sleeve.</p>
       <div class="table-wrap"><table class="small"><thead><tr><th>Sleeve</th><th class="r">Target %</th><th class="r">Band \u00b1</th><th class="r">AI share %</th><th>Cash sleeve</th><th>Colour</th><th></th></tr></thead><tbody>
         ${d.sleeves.map(x => `<tr data-sleeve="${x.id}">
@@ -1490,6 +1522,19 @@ async function vSettings(el) {
     </section>
 
     ${cashPanel(d)}
+
+    <section class="panel"><h2>Sections</h2>
+      <p class="lede">Two more parts of Whiskers, for anyone who wants them. Each adds one screen to the sidebar and one line to the Overview. Off means nothing on screen and nothing counted.</p>
+      <div class="checks">
+        <label><input type="checkbox" data-act="section-toggle" data-key="mortgage" ${s.show_mortgage ? 'checked' : ''}><span><b>Mortgage</b><br><span class="small muted">The balance running down, the date the fixed rate ends, what an overpayment would save, and your home in your net worth.</span></span></label>
+        <label><input type="checkbox" data-act="section-toggle" data-key="retirement" ${s.show_retirement ? 'checked' : ''}><span><b>Retirement</b><br><span class="small muted">Your pensions, the State Pension, and a year-by-year plan to the end of retirement.</span></span></label>
+      </div>
+      <p class="note" style="margin-top:8px">Switching one off deletes nothing: what you entered comes back when you switch it on again.</p>
+    </section>
+    <section class="panel"><h2>Text size</h2>
+      <p class="lede">Larger text is easier to read; charts keep their size. On a computer, Ctrl and + also zooms the whole window.</p>
+      <div class="row wrap" role="radiogroup" aria-label="Text size">${[['normal', 'Normal'], ['larger', 'Larger'], ['largest', 'Largest']].map(([k, l]) => `<label class="row small"><input type="radio" name="text-size" data-act="text-size" value="${k}" ${(s.text_size || 'normal') === k ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+    </section>
     ${extra('middle')}
 
     <section class="panel"><h2>Where prices come from</h2>
@@ -1503,8 +1548,8 @@ async function vSettings(el) {
         <button class="btn" data-act="refresh-all">Fetch everything again</button></div>
     </section>
 
-    <section class="panel"><h2>Sample household</h2>
-      <p class="lede">A made-up household for trying things out: investments on two sample platforms, a home and its mortgage, two pensions, savings in pounds and in rand, and the basics of a retirement plan. Remove it before adding your own, or its made-up figures count in your totals.</p>
+    <section class="panel"><h2>Sample portfolio</h2>
+      <p class="lede">A made-up portfolio on two sample platforms, for trying things out, with a home, a mortgage and two pensions for the Mortgage and Retirement sections if you switch them on. Remove it before connecting your own platforms, or its made-up figures count in your totals.</p>
       ${d.sample ? '<button class="btn danger" data-act="sample-remove">Remove the sample</button>' : '<button class="btn" data-act="sample-load">Load the sample</button>'}
     </section>
 
@@ -1515,14 +1560,14 @@ async function vSettings(el) {
         <dt>Updates</dt><dd>${up ? updateWords(up) : 'Unknown'}</dd>
         <dt>Your data</dt><dd class="small">${esc(d.data_dir)}</dd>
         <dt>Keys stored</dt><dd class="small">${onAndroid() ? 'Encrypted, in storage only the Whiskers app can read' : d.vault === 'os-keychain' ? 'Encrypted, with the key in your computer\u2019s own credential store' : 'Encrypted in the data folder (no credential store was found on this computer)'}</dd></dl>
-      <div class="row wrap" style="margin-top:10px">${up && up.status !== 'off' ? '<button class="btn" data-act="upd-check">Check for an update</button>' : ''}<button class="btn" data-act="export-xlsx">Export to a spreadsheet</button>${onAndroid() ? '' : '<button class="btn" data-act="export-phone">A copy for your phone</button><button class="btn" data-act="open-data">Open the data folder</button>'}<button class="btn" data-act="tour">Take the tour</button>
+      <div class="row wrap" style="margin-top:10px">${up && up.status !== 'off' ? '<button class="btn" data-act="upd-check">Check for an update</button>' : ''}<button class="btn" data-act="export-xlsx">Export to a spreadsheet</button>${onAndroid() ? '' : '<button class="btn" data-act="open-data">Open the data folder</button>'}<button class="btn" data-act="tour">Take the tour</button>
         <label class="row small"><input type="checkbox" data-act="toggle-refresh" ${s.refresh_on_open ? 'checked' : ''}>Refresh when Whiskers opens</label></div>
-      <p class="note" style="margin-top:6px">Export to a spreadsheet makes an Excel file of everything: your net worth, holdings, dividends, trades, cash movements and how you\u2019re allocated against your plan, and the mortgage, pensions and year-by-year retirement plan when there are any.${onAndroid() ? '' : ' <b>A copy for your phone</b> makes one page of your figures to read on a phone without the Whiskers app, such as an iPhone: save it somewhere private the phone can open (your own iCloud Drive, OneDrive or Google Drive) and tap it. It is a snapshot, so make a new one now and then.'}</p>
+      <p class="note" style="margin-top:6px">Export to a spreadsheet makes an Excel file of everything: your holdings, dividends, trades, cash movements and how you\u2019re allocated against your plan, and your net worth, mortgage, pensions and year-by-year retirement plan when those sections are on.</p>
     </section>
     ${extra('bottom')}
     <section class="panel"><h2>Help</h2>
       <p class="lede">Something wrong, or an idea? The Help button opens an email to ${esc(S.boot.settings.help_email || 'Allan')} with the app\u2019s version and the screen you were on. Nothing about your money goes in it.</p>
-      <div class="row wrap"><button class="btn" data-act="help-email">Email for help</button><button class="btn ghost" data-act="glossary">Words explained</button></div>
+      <div class="row wrap"><button class="btn" data-act="help-email">Email for help</button></div>
     </section>
     <p class="note">Whiskers is a personal tool for keeping to your own plan. It is not financial advice. It only ever reads from your platforms and cannot place a trade.</p>
   </div>`;
@@ -1530,13 +1575,18 @@ async function vSettings(el) {
 
 // Other screens' files add their own Settings panels here: { top, middle, bottom }.
 const SETTINGS_PANELS = { top: [], middle: [], bottom: [] };
-ACTS['tab-toggle'] = async b => {
+// Mortgage and Retirement: on or off. Nothing is deleted when one goes off.
+async function setSection(key, on) {
+  await api('/api/settings', { method: 'PATCH', body: { [`show_${key}`]: !!on } });
+  S.boot.settings[`show_${key}`] = !!on;
+  buildNav();
+}
+ACTS['section-toggle'] = async b => {
   const key = b.dataset.key;
   try {
-    await api('/api/settings', { method: 'PATCH', body: { [key]: b.checked } });
-    S.boot.settings[key] = b.checked;
-    buildNav();
-    toast(b.checked ? 'Switched on. It\u2019s in the tabs along the top.' : 'Switched off. Nothing in it is deleted; switch it back on any time.');
+    await setSection(key, b.checked);
+    toast(b.checked ? `${VIEWS[key].navTitle || VIEWS[key].title} is on: it\u2019s in the sidebar, and has a line on the Overview.`
+      : 'Switched off. Nothing in it is deleted; switch it back on any time.');
   } catch (e) { toast(e.message, true); b.checked = !b.checked; }
 };
 ACTS['help-email'] = () => openHelpEmail();
@@ -1730,13 +1780,6 @@ ACTS['export-xlsx'] = async b => {
     toast(said || 'Downloaded.');
   });
 };
-ACTS['export-phone'] = async b => {
-  await busy(b, async () => {
-    const res = await api('/api/export/phone');
-    const said = await saveBlob(await res.blob(), `${S.boot.app.name} - your money at a glance.html`);
-    toast(said || 'Downloaded. Put it somewhere private your phone can open, such as your own iCloud Drive, and tap it there.');
-  });
-};
 ACTS['text-size'] = async b => {
   S.boot.settings.text_size = b.value;
   applyText();
@@ -1895,11 +1938,8 @@ async function boot() {
   applyHide();
   buildNav();
   $('#fake-banner').hidden = !S.boot.app.fake_market;
-  if (S.boot.app.tagline) $('#brand-sub').textContent = S.boot.app.tagline;
   $('#refresh-btn').addEventListener('click', () => startRefresh(false));
-  $('#settings-btn').addEventListener('click', () => go('settings'));
   $('#help').addEventListener('click', openHelpEmail);
-  wireLogo();
   if (typeof wireDrop === 'function') wireDrop();
   $('#tour-btn').addEventListener('click', () => startTour());
   // Web links open in your own browser, whichever window Whiskers is running in: inside
@@ -1920,7 +1960,7 @@ async function boot() {
   $('#boot').remove();
   $('#app').hidden = false;
   const want = location.hash.slice(1);
-  go(VIEWS[want] ? want : 'overall');
+  go(VIEWS[want] ? want : 'overview');
   if (!S.boot.settings.toured) setTimeout(() => startTour(), 900);
   pollRefresh();
   checkUpdateBanner();
@@ -1929,36 +1969,10 @@ async function boot() {
   syncPull();
 }
 
-// The screens live in several files (overall.js, mortgage.js, retirement.js and the rest),
+// The screens live in several files (mortgage.js, retirement.js, builder.js and the rest),
 // loaded after this one. Starting once the page has finished loading means every screen
 // is registered before the first one is drawn.
 document.addEventListener('DOMContentLoaded', boot);
-
-// ============================================================================ the logo
-// From Mittens & Pence: the cat does her ten seconds, then sits still for two to three
-// minutes. Restarting a CSS animation needs the class off, a reflow, and the class back
-// on; setting it twice in the same frame does nothing.
-let logoTimer;
-function playLogo() {
-  const el = $('#logo');
-  if (!el) return;
-  el.classList.remove('playing');
-  void el.offsetWidth;
-  el.classList.add('playing');
-}
-function scheduleLogo(first = false) {
-  clearTimeout(logoTimer);
-  const wait = first ? 1200 : (120 + Math.random() * 60) * 1000;
-  logoTimer = setTimeout(() => { playLogo(); scheduleLogo(); }, wait);
-}
-function wireLogo() {
-  const el = $('#logo');
-  if (!el) return;
-  el.addEventListener('animationend', e => { if (e.animationName === 'sprite-y') el.classList.remove('playing'); });
-  el.addEventListener('click', () => { playLogo(); scheduleLogo(); });
-  document.addEventListener('visibilitychange', () => { if (document.hidden) clearTimeout(logoTimer); else scheduleLogo(); });
-  scheduleLogo(true);
-}
 
 // ============================================================================ help
 // From Mittens & Pence: one button that opens the person's own email with enough in it to
@@ -2222,19 +2236,20 @@ ACTS.gone = async b => {
 // itself once, and again whenever the Tour button or Settings asks. A step whose part of
 // the screen isn't there yet (a brand-new copy has no holdings) is shown in the middle.
 const TOUR = [
-  { title: 'Welcome to Whiskers', text: 'Everything you own and owe, in one place: your investments, your mortgage, your pensions and a plan for retirement. It only ever reads from your accounts: it cannot buy, sell or move money. This tour takes about a minute.', sample: true },
-  { title: 'Five tabs', target: '#tabs', text: () => `Along the ${innerWidth <= 600 ? 'bottom' : 'top'}: Overall for the whole picture, Investments for everything you hold, Mortgage, and Retirement for your pensions and a year-by-year plan. A Budget tab can be switched on in Settings.` },
-  { title: 'The whole picture', view: 'overall', target: '.figures', text: 'What you own, what you owe, and the difference. A pension that promises an income is shown as income, never counted as money you could spend tomorrow.' },
-  { title: 'How each part is doing', view: 'overall', target: '.tiles', text: 'One tile for each tab, with a light: green is fine, amber is worth a look, red needs attention. Click one to go there.' },
-  { title: 'Your plan review', view: 'plan', target: '.parts', text: 'Eight short sets of questions, saved as you go, that become a plan built around you: how much risk suits you, what to keep an eye on, your own rules, and a list of things worth doing.' },
-  { title: 'The screens in each tab', target: '#nav', text: 'The sidebar lists the screens inside the tab that is open. Investments has a summary, every holding, your allocation, the market watch, markets, activity, and importing files.' },
-  { title: 'Market watch', view: 'ai', target: '.monitor', text: 'Warning lights for markets in general, the economy, and whatever moves most of your money, each judged on a week of readings rather than one day. They describe what has already happened; none of them can predict what happens next.' },
-  { title: 'Importing files', view: 'import', target: '.dropzone', text: 'Drop a statement or holdings file anywhere on the window. Or keep a statements folder: anything put in it is read the next time you press Refresh.' },
-  { title: 'Retirement, year by year', view: 'retirement', target: '.panel', text: 'Each year from now to the end of the plan, in today\u2019s money: what comes in, what goes out, and which pot pays the difference. Stress tests show what a bad few years would do.' },
+  { title: 'Welcome to Whiskers', text: 'Your investments, the limits you set for them, and what markets are doing, in one place. It only ever reads from your platforms: it cannot buy, sell or move money. This tour takes about a minute.', sample: true },
+  { title: 'Seven screens', target: '#nav', text: () => `Overview for the headlines, Holdings for each investment, Allocation for your plan, Market watch for warning lights, Markets for the indices behind them, Activity for money in and out, and Settings to connect everything. ${SECTIONS.some(sectionOn) ? `${SECTIONS.filter(sectionOn).map(k => VIEWS[k].navTitle || VIEWS[k].title).join(' and ')} ${SECTIONS.filter(sectionOn).length > 1 ? 'are' : 'is'} there too, because you switched ${SECTIONS.filter(sectionOn).length > 1 ? 'them' : 'it'} on.` : 'A Mortgage and a Retirement section can be added in Settings, Sections, for anyone who wants them.'}` },
+  { title: 'Your totals', view: 'overview', target: '.figures', text: 'What everything is worth, what you paid, cash waiting to be invested and dividends. A figure nobody can price is left out and flagged, never counted as zero.' },
+  { title: 'Things to look at', view: 'overview', target: '.alerts', text: 'Anything past a limit you set, worst first: red to act on, amber to watch, blue for information. Each one says how long it has been like that, and clicking it takes you to the screen that explains it.' },
+  { title: 'Your watch and the big picture', view: 'overview', target: '.monitor', text: () => `${S.boot && S.boot.watch && !S.boot.watch.legacy ? (S.boot.watch.title || 'Your main watch') : 'The AI trade'} at a glance, then three short paragraphs: what you watch, markets and the economy, and what it all means for your own portfolio.` },
+  { title: 'Every holding', view: 'holdings', target: '.table-wrap', text: 'Grouped into your sleeves, with a year\u2019s price line for each. Click a holding for its chart, its details, and to correct anything the platform got wrong.' },
+  { title: 'Your plan against reality', view: 'allocation', target: '.bands', text: 'Each sleeve against its target. The tick is the target, the dot is where you are: green is fine, amber is drifting, red is outside its band. \u201cPut new money to work\u201d shows where a contribution would do most good.' },
+  { title: 'Market watch', view: 'ai', target: '.monitor', text: 'Warning lights for markets in general, the economy, and what you watch, each judged on a week\u2019s readings rather than one day. They describe what has already happened; none of them can predict what happens next.' },
+  { title: 'Markets', view: 'markets', target: 'p.narrative', text: 'The indices, rates and commodities behind your holdings, each section with a short summary of what it is saying.' },
+  { title: 'Setting up', view: 'settings', target: '.panel', text: () => `Find your platforms, banks and pensions in the list of UK and South African firms, drop in a statement file, add cash and cards, and build your plan with the plan builder or load a plan file. Nothing leaves your ${DEVICE()}.` },
   { title: 'Keeping it up to date', target: '#refresh-btn', text: 'Refresh fetches the latest prices, updates any connected accounts and reads your statements folder. Whiskers also does this each time it opens.' },
-  { title: 'Settings and help', target: '#settings-btn', text: () => `Settings switches tabs on and off and connects your accounts. The Help button in the sidebar emails Allan, with nothing about your money in it. Nothing leaves your ${DEVICE()} otherwise.` },
+  { title: 'Help', target: '#help', text: 'Something wrong, or an idea? The Help button opens an email to Allan, with the app\u2019s version and nothing about your money.' },
   { title: 'Hide amounts', target: '#hide-btn', text: 'Blurs every pound figure, for when someone can see your screen. Percentages stay visible.' },
-  { title: 'That\u2019s it', text: 'The Tour button, and Settings, bring this back any time. Nothing here is financial advice: Whiskers measures your money against your own plan.' },
+  { title: 'That\u2019s it', text: 'The Tour button in the sidebar, and Settings, bring this back any time. Nothing here is financial advice: Whiskers measures your portfolio against your own plan.' },
 ];
 let tourAt = -1;
 
@@ -2363,54 +2378,10 @@ ACTS.tour = () => startTour();
 window.whiskersBack = () => {
   if (tourAt >= 0) { endTour(); return true; }
   if (!$('#modal').hidden) { closeModal(); return true; }
-  if (S.view !== 'overall') { go('overall'); return true; }
+  if (S.view === 'builder') { go('settings'); return true; }
+  if (VIEWS[S.view] && VIEWS[S.view].parent && VIEWS[S.view].parent !== S.view) { go(VIEWS[S.view].parent); return true; }
+  if (S.view !== 'overview') { go('overview'); return true; }
   return false;
 };
 
 
-// ============================================================================ plan builder
-
-// Ten questions, a draft plan, and why it came out that way. Nothing is saved until
-// "Use this plan": the draft comes back from the server and is only imported then.
-ACTS['plan-wizard'] = async () => {
-  if (!S.wizQ) S.wizQ = (await api('/api/plan/questions')).questions;
-  const a = S.wizA || {};
-  openModal({
-    title: 'Build a plan from questions', wide: true,
-    body: `<p class="small">About two minutes. You\u2019ll see the plan, and why, before anything is saved.</p>` +
-      S.wizQ.map((q, i) => `<fieldset class="wiz"><legend>${i + 1}. ${esc(q.text)}</legend>${q.options.map(([v, l]) =>
-        `<label class="wiz-opt"><input type="${q.kind === 'many' ? 'checkbox' : 'radio'}" name="wiz-${q.id}" value="${esc(v)}" ${(q.kind === 'many' ? (a[q.id] || []).includes(v) : a[q.id] === v) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</fieldset>`).join(''),
-    foot: '<button class="btn primary" data-act="plan-wizard-build">Show my plan</button>',
-  });
-};
-ACTS['plan-wizard-build'] = async () => {
-  const a = {};
-  for (const q of S.wizQ) {
-    const picked = $$(`input[name="wiz-${q.id}"]:checked`).map(i => i.value);
-    a[q.id] = q.kind === 'many' ? picked : picked[0];
-  }
-  S.wizA = a;
-  const gap = S.wizQ.findIndex(q => q.kind === 'one' && !a[q.id]);
-  if (gap >= 0) { toast(`Please answer question ${gap + 1}.`, true); return; }
-  const out = await api('/api/plan/build', { method: 'POST', body: { answers: a } });
-  S.wizPlan = out.plan;
-  const rows = out.plan.sleeves.map(x => `<tr><td>${esc(x.name)}</td><td class="r">${pts(x.target, x.target % 1 ? 1 : 0)}</td></tr>`).join('');
-  openModal({
-    title: 'Your starting plan', wide: true,
-    body: `<div class="grid g2"><div><table><thead><tr><th>Sleeve</th><th class="r">Target</th></tr></thead><tbody>${rows}</tbody></table>
-      ${out.plan.rules.map(r => `<p class="small" style="margin-top:10px">Rule: ${esc(r.note)}</p>`).join('')}
-      ${out.plan.platforms.length ? `<p class="small" style="margin-top:6px">Platforms: ${out.plan.platforms.map(x => esc(x.name)).join(', ')}, each kept under \u00a3${Number(out.plan.platforms[0].limit).toLocaleString('en-GB')}.</p>` : ''}</div>
-      <div><h3>Why</h3><ul class="small" style="padding-left:18px;display:grid;gap:6px">${out.why.map(w => `<li>${esc(w)}</li>`).join('')}</ul>
-        ${out.plan.plans && out.plan.plans.crash ? `<h3 style="margin-top:12px">Your plan for a fall, to start from</h3><p class="small">${esc(out.plan.plans.crash)}</p>` : ''}
-        <h3 style="margin-top:12px">Based on</h3><ul class="tiny" style="padding-left:18px;display:grid;gap:4px">${(out.sources || []).map(([t, u]) => `<li><a href="${esc(u)}">${esc(t)}</a></li>`).join('')}</ul></div></div>
-      <p class="note" style="margin-top:12px">Using it replaces your current sleeves and targets. Holdings already sorted into sleeves with other names go back to \u201cnot in a sleeve yet\u201d.</p>`,
-    foot: '<button class="btn" data-act="plan-wizard">Change my answers</button><button class="btn primary" data-act="plan-wizard-use">Use this plan</button>',
-  });
-};
-ACTS['plan-wizard-use'] = async () => {
-  const out = await api('/api/plan/import', { method: 'POST', body: S.wizPlan });
-  closeModal();
-  toast(`Plan set: ${plural(out.report.sleeves, 'sleeve')}. Sort your holdings into them on the Allocation screen.`);
-  S.boot = await api('/api/bootstrap');
-  render();
-};

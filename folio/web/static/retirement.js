@@ -1,13 +1,19 @@
-/* Whiskers: the Retirement tab. A plan one row a year, from now to the end of the plan,
-   in today's money; the pensions it rests on; and the State Pension.
+/* Whiskers: the Retirement section, off unless switched on in Settings, Sections. One screen
+   in the sidebar with three pages: a plan one row a year, from now to the end of the plan, in
+   today's money; the pensions it rests on; and the State Pension. Its own questions live
+   here, never in the plan builder, which reads what it needs from them.
 
    Nothing here is a forecast. Returns are steady assumptions the person can change, and
    the stress tests exist because real returns are not steady. */
 'use strict';
 
-VIEWS.retirement = { title: 'Retirement plan', navTitle: 'Year by year', sub: 'Each year to the end of the plan, in today’s money: what comes in, what goes out, and which pot pays the difference.', render: vRetirement };
-VIEWS.pensions = { title: 'Pensions', sub: 'Every pension you have: final salary, pots, annuities and anything in South Africa.', render: vPensions };
-VIEWS.statepension = { title: 'State Pension', sub: 'When it starts, roughly how much, and whether filling a gap in your record pays.', render: vStatePension };
+VIEWS.retirement = { title: 'Retirement', navTitle: 'Retirement', section: 'retirement', parent: 'retirement', sub: 'Each year to the end of the plan, in today’s money: what comes in, what goes out, and which pot pays the difference.', render: vRetirement };
+VIEWS.pensions = { title: 'Pensions', section: 'retirement', parent: 'retirement', sub: 'Every pension you have: final salary, pots, annuities and anything in South Africa.', render: vPensions };
+VIEWS.statepension = { title: 'State Pension', section: 'retirement', parent: 'retirement', sub: 'When it starts, roughly how much, and whether filling a gap in your record pays.', render: vStatePension };
+
+// The section's three pages, one tab each, above whichever is open.
+const RET_PAGES = [['retirement', 'Year by year'], ['pensions', 'Pensions'], ['statepension', 'State Pension']];
+const retTabs = cur => `<nav class="subtabs" aria-label="Retirement">${RET_PAGES.map(([k, l]) => `<button type="button" data-go="${k}" class="${k === cur ? 'on' : ''}" ${k === cur ? 'aria-current="page"' : ''}>${l}</button>`).join('')}</nav>`;
 
 const POT_COLOURS = { cash: '#4f8fd6', isa: 'var(--accent)', gia: '#3d9c8f', abroad: '#c98a3a', pensions: '#8a63c9' };
 const IN_COLOURS = { salary: '#4f8fd6', state: 'var(--green)', db: '#8a63c9', annuity: '#b07fd6', other: '#7a8a99', lump: '#c9a53a',
@@ -33,7 +39,7 @@ async function vRetirement(el) {
     .filter(([k]) => rows.some(r => r[k] > 0.5));
   const outgoings = rows.map(r => r.spend + r.one_off + r.mortgage + r.tax);
   const atStop = rows.find(r => r.age >= p.stop_age) || rows[0];
-  el.innerHTML = `<div class="stack-lg">
+  el.innerHTML = `<div class="stack-lg">${retTabs('retirement')}
     <section class="panel">
       <div class="verdict">
         <div class="big ${p.lasts ? 'ok' : 'short'}">${p.lasts ? `Lasts to ${Math.round(p.horizon)}` : `Runs short at ${ageOf(p.runs_out_at)}`}</div>
@@ -161,17 +167,17 @@ ACTS['ret-order'] = async b => {
 function retBasics(el, d) {
   const s = d.settings;
   el.dataset.sub = 'Three things and the plan can run: your date of birth, when you’d like to stop working, and what you spend.';
-  el.innerHTML = `<div class="stack-lg" style="max-width:900px"><section class="panel"><h2>The basics</h2>
-    <p class="lede">The plan review on the Overall tab asks these too, with everything else a plan needs. Your answers go to the same place, so neither can disagree.</p>
+  el.innerHTML = `<div class="stack-lg" style="max-width:900px">${retTabs('retirement')}<section class="panel"><h2>The basics</h2>
+    <p class="lede">Three things and the year-by-year plan can run. Your pensions, the State Pension and everything else can be added whenever you like; each makes the plan truer.</p>
     <div class="form-grid">
       <label class="field">Date of birth<input type="date" id="rb-dob" value="${esc(s.dob || '')}" max="${new Date().toISOString().slice(0, 10)}"></label>
       <label class="field">Stop working at (age)<input type="number" id="rb-stop" min="40" max="85" step="0.5" value="${esc(s.stop_age ?? '')}" placeholder="60"></label>
-      <label class="field">Essential spending, a month<input type="number" id="rb-ess" min="0" step="50" value="${esc(s.spend_essential ?? '')}" placeholder="1,800"><span class="help">Bills, food, transport, insurance, council tax. Not the mortgage: it comes from the Mortgage tab.</span></label>
+      <label class="field">Essential spending, a month<input type="number" id="rb-ess" min="0" step="50" value="${esc(s.spend_essential ?? '')}" placeholder="1,800"><span class="help">Bills, food, transport, insurance, council tax. Not the mortgage: it comes from the Mortgage section, when that is on.</span></label>
       <label class="field">Extras, a month<input type="number" id="rb-extra" min="0" step="50" value="${esc(s.spend_extra ?? '')}" placeholder="800"><span class="help">Holidays, hobbies, eating out, gifts.</span></label>
       <label class="field">Where you live<select id="rb-nation">${Object.entries(d.nations).map(([k, l]) => `<option value="${k}" ${k === s.nation ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
       <label class="field">The plan runs to (age)<input type="number" id="rb-hz" min="70" max="110" value="${esc(s.horizon_age ?? 95)}"></label>
     </div>
-    <div class="row" style="margin-top:14px"><button class="btn primary" data-act="rb-save">Run the plan</button><button class="btn ghost" data-go="plan">Do the full plan review instead</button></div>
+    <div class="row" style="margin-top:14px"><button class="btn primary" data-act="rb-save">Run the plan</button><button class="btn ghost" data-go="pensions">Add your pensions first</button></div>
     ${d.missing.length ? `<p class="small muted" style="margin-top:8px">Still needed: ${esc(d.missing.join(', '))}.</p>` : ''}</section></div>`;
 }
 ACTS['rb-save'] = async b => {
@@ -214,7 +220,7 @@ function retFigures(d) {
         <label class="field">Extras, a month${num('rf-extra', s.spend_extra, { min: 0, step: 50 })}</label>
         <label class="field">From 75, extras fall by (%)${num('rf-75', s.spend_less_from_75, { min: 0, max: 90, step: 5 })}</label>
         <label class="field">Emergency fund kept back (months of essentials)${num('rf-em', s.emergency_months, { min: 0, max: 60, step: 1 })}</label>
-        <label class="field">The mortgage${sel('rf-clear', [['false', 'Runs to its end'], ['true', 'Cleared when I stop work']], String(!!s.clear_mortgage_at_stop))}</label>
+        ${sectionOn('mortgage') ? `<label class="field">The mortgage${sel('rf-clear', [['false', 'Runs to its end'], ['true', 'Cleared when I stop work']], String(!!s.clear_mortgage_at_stop))}</label>` : ''}
         <label class="field">Tax-free cash from pension pots${sel('rf-tfc', [['upfront', 'A quarter at the start'], ['ufpls', 'A quarter of each withdrawal']], s.tax_free_cash)}</label>
         <label class="field">Home goes to children or grandchildren${sel('rf-home', [['true', 'Yes'], ['false', 'No']], String(s.home_to_children !== false))}</label>
       </div>
@@ -249,7 +255,7 @@ ACTS['rf-save'] = async b => {
   const body = { dob: v('rf-dob'), nation: v('rf-nation'), partner: v('rf-partner') === 'true', retire_country: v('rf-country'), horizon_age: v('rf-hz'),
     stop_age: v('rf-stop'), salary: v('rf-salary'), salary_growth: v('rf-sg'), cut_back_age: v('rf-cba'), cut_back_pct: v('rf-cbp'),
     contrib_pct: v('rf-cp'), contrib_method: v('rf-cm'), saving_monthly: v('rf-save'), spend_essential: v('rf-ess'), spend_extra: v('rf-extra'),
-    spend_less_from_75: v('rf-75'), emergency_months: v('rf-em'), clear_mortgage_at_stop: v('rf-clear') === 'true', tax_free_cash: v('rf-tfc'),
+    spend_less_from_75: v('rf-75'), emergency_months: v('rf-em'), clear_mortgage_at_stop: $('#rf-clear') ? v('rf-clear') === 'true' : !!S.ret.settings.clear_mortgage_at_stop, tax_free_cash: v('rf-tfc'),
     home_to_children: v('rf-home') === 'true', one_offs: readList('oo'), other_income: readList('oi'), assumptions };
   await busy(b, async () => {
     await api('/api/retirement', { method: 'PATCH', body });
@@ -292,16 +298,16 @@ async function vPensions(el) {
   const d = await api('/api/pensions');
   S.pens = d;
   const sp = d.state_pension;
-  el.innerHTML = `<div class="stack-lg">
+  el.innerHTML = `<div class="stack-lg">${retTabs('pensions')}
     <section class="panel"><div class="spread"><h2>Your pensions</h2>
       <div class="row wrap">${Object.entries(PENSION_ADD).map(([k, l]) => `<button class="btn small ${k === 'db' ? 'primary' : ''}" data-act="pen-add" data-kind="${k}">${esc(l)}</button>`).join('')}</div></div>
-      <p class="lede">Each is shown as income from its own age on the Retirement plan. A promise of so much a year is never added to what you own as though it could be spent tomorrow.</p>
+      <p class="lede">Each is shown as income from its own age on the year-by-year plan. A promise of so much a year is never added to what you own as though it could be spent tomorrow.</p>
       ${d.items.length ? d.items.map(p => `<div class="pension"><div><b>${esc(p.name)}</b> <span class="kind">${esc(d.kinds[p.kind] || p.kind)}${p.provider ? `, ${esc(p.provider)}` : ''}</span>
           <div class="small"><span class="pv">${esc(p.describe)}</span>${p.kind === 'db' && p.accruing ? ', still building up' : ''}</div>
           <div class="tiny muted">${p.pot_as_of || p.yearly_as_of ? `From the statement of ${fmtDate(p.pot_as_of || p.yearly_as_of)}. ` : ''}${p.nominee ? `Nominated: ${esc(p.nominee)}.` : '<span class="warnline">No nomination recorded.</span>'}</div></div>
         <div class="row"><button class="btn small" data-act="pen-edit" data-id="${p.id}">Change</button><button class="btn small ghost danger" data-act="pen-del" data-id="${p.id}" data-name="${esc(p.name)}">Remove</button></div></div>`).join('')
         : '<p class="muted">None added yet. Start with the biggest; its latest statement has what’s needed.</p>'}
-      ${d.sipps.length ? `<p class="small" style="margin-top:10px">Tracked on the Investments tab, not here (adding them again would count them twice): ${d.sipps.map(x => `${esc(x.name)} ${money(x.total, { dp: 0 })}`).join(', ')}.</p>` : ''}
+      ${d.sipps.length ? `<p class="small" style="margin-top:10px">Tracked with your investments, not here (adding them again would count them twice): ${d.sipps.map(x => `${esc(x.name)} ${money(x.total, { dp: 0 })}`).join(', ')}.</p>` : ''}
     </section>
     <section class="panel"><h2>The State Pension</h2>
       ${sp && known(sp.weekly) ? `<p>${money(sp.weekly, { dp: 2 })} a week (${money(sp.yearly, { dp: 0 })} a year) from ${esc(d.spa.words)}, on ${fmtDate(d.spa.date)}: ${esc(sp.basis)}.</p>` : '<p class="muted">Not entered yet.</p>'}
@@ -380,7 +386,7 @@ ACTS['pen-save'] = async b => {
   });
 };
 ACTS['pen-del'] = async b => {
-  if (!await confirmBox(`Remove ${b.dataset.name}?`, 'It comes out of the retirement plan and the Overall picture. The pension itself is not touched.', 'Remove', true)) return;
+  if (!await confirmBox(`Remove ${b.dataset.name}?`, 'It comes out of the retirement plan and your net worth. The pension itself is not touched.', 'Remove', true)) return;
   await api(`/api/pensions/${b.dataset.id}`, { method: 'DELETE' }).catch(e => toast(e.message, true));
   render();
 };
@@ -391,7 +397,7 @@ async function vStatePension(el) {
   const d = await api('/api/pensions');
   const s = d.settings, sp = d.state_pension, spa = d.spa;
   const stored = s.state_pension || {};
-  el.innerHTML = `<div class="stack-lg">
+  el.innerHTML = `<div class="stack-lg">${retTabs('statepension')}
     <div class="grid g2">
       <section class="panel"><h2>When</h2>
         ${spa ? `<div class="fig" style="font-size:2rem">${esc(spa.words)}</div><p>On ${fmtDate(spa.date)}.</p>${spa.note ? `<p class="small muted" style="margin-top:6px">${esc(spa.note)}</p>` : ''}`

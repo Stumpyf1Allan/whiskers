@@ -16,10 +16,17 @@ from .. import db
 from . import allocation
 from ..brokers import symbols
 
-#: 2 (in 2.0) adds the watch, the retirement settings and the plan review's answers. A
-#: version 1 file — Allan's own, say — still loads exactly as it did.
+#: 2 (in 1.1) adds the watch, the retirement settings, the plan builder's answers, each
+#: sleeve's reasons in the person's own words, and the parachute rules. A version 1 file —
+#: Allan's own, say — still loads exactly as it did.
 FORMAT = 2
-KINDS = {"company_cap", "theme_cap", "ai_cap", "exposure_cap"}
+#: Limits: warn, and say what trimming back would take.
+CAP_KINDS = {"company_cap", "theme_cap", "ai_cap", "exposure_cap", "any_company_cap"}
+#: Steps agreed in calm weather: when a theme's lights turn (theme_step), and when a theme
+#: somebody is waiting on has fallen far enough to buy (theme_dip). Each names the sleeve the
+#: money comes from and the sleeve it goes to.
+STEP_KINDS = {"theme_step", "theme_dip"}
+KINDS = CAP_KINDS | STEP_KINDS
 
 
 class PlanError(ValueError):
@@ -74,12 +81,17 @@ def import_plan(data: dict | str | bytes) -> dict:
                 if not allocation.BAND_MIN <= band <= allocation.BAND_MAX:
                     raise PlanError(f"The band for {name} should be between {allocation.BAND_MIN:g} "
                                     f"and {allocation.BAND_MAX:g}, not {band:g}")
-            c.execute("INSERT INTO sleeves(name,target,band,ai_share,is_cash,colour,sort) "
-                      "VALUES(?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET target=excluded.target,"
+            theme = s.get("theme") if isinstance(s.get("theme"), str) else None
+            why = str(s["why"]).strip()[:1200] if isinstance(s.get("why"), str) and s["why"].strip() else None
+            change = str(s["change"]).strip()[:1200] if isinstance(s.get("change"), str) and s["change"].strip() else None
+            c.execute("INSERT INTO sleeves(name,target,band,ai_share,is_cash,colour,sort,theme,why,breakers) "
+                      "VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET target=excluded.target,"
                       " band=excluded.band, ai_share=excluded.ai_share, is_cash=excluded.is_cash,"
-                      " colour=COALESCE(excluded.colour, sleeves.colour), sort=excluded.sort",
+                      " colour=COALESCE(excluded.colour, sleeves.colour), sort=excluded.sort,"
+                      " theme=COALESCE(excluded.theme, sleeves.theme), why=COALESCE(excluded.why, sleeves.why),"
+                      " breakers=COALESCE(excluded.breakers, sleeves.breakers)",
                       (name, target, band, _pct(s.get("ai_share"), f"{name}'s AI share", True),
-                       1 if s.get("is_cash") else 0, s.get("colour"), i))
+                       1 if s.get("is_cash") else 0, s.get("colour"), i, theme, why, change))
             rep["sleeves"] += 1
         if data.get("replace_sleeves"):
             # The plan is the whole list: sleeves it doesn't name (a template's "Global
@@ -96,15 +108,34 @@ def import_plan(data: dict | str | bytes) -> dict:
             if kind not in KINDS:
                 raise PlanError(f"Unknown rule kind {kind!r}")
             subject = (r.get("subject") or "").strip() or None
-            if kind != "ai_cap" and not subject:
+            if kind not in ("ai_cap", "any_company_cap") and not subject:
                 raise PlanError(f"A {kind} rule needs a subject.")
+            sleeve = into = None
+            if kind in STEP_KINDS:
+                sleeve, into = str(r.get("sleeve") or "").strip(), str(r.get("into") or "").strip()
+                for nm, word in ((sleeve, "from"), (into, "into")):
+                    if not c.execute("SELECT 1 FROM sleeves WHERE name=?", (nm,)).fetchone():
+                        raise PlanError(f"The {kind.replace('_', ' ')} for {subject} moves money {word} "
+                                        f"{nm or 'a sleeve it doesn’t name'}, but there is no sleeve called that.")
+                if sleeve == into:
+                    raise PlanError(f"The {kind.replace('_', ' ')} for {subject} moves money from {sleeve} into itself.")
+            if kind == "theme_step":
+                trigger = _pct(r.get("trigger"), "A step's number of red lights")
+                if not 1 <= trigger <= 10:
+                    raise PlanError("A step waits for between 1 and 10 red lights.")
+                target = _pct(r.get("target", 33), "The share of the sleeve a step moves")
+            elif kind == "theme_dip":
+                trigger = _pct(r.get("trigger"), "The fall a buying rule waits for")
+                target = _pct(r.get("target"), "The points a buying rule moves")
+            else:
+                trigger = _pct(r.get("trigger"), "A rule's trigger")
+                target = _pct(r.get("target"), "A rule's target", True)
             c.execute("DELETE FROM rules WHERE kind=? AND COALESCE(lower(subject),'')=?",
                       (kind, (subject or "").lower()))
-            c.execute("INSERT INTO rules(kind,subject,trigger_pct,target_pct,basis,note) "
-                      "VALUES(?,?,?,?,?,?)",
-                      (kind, subject, _pct(r.get("trigger"), "A rule's trigger"),
-                       _pct(r.get("target"), "A rule's target", True),
-                       "true" if r.get("basis") == "true" else "direct", r.get("note")))
+            c.execute("INSERT INTO rules(kind,subject,trigger_pct,target_pct,basis,note,sleeve,into_sleeve) "
+                      "VALUES(?,?,?,?,?,?,?,?)",
+                      (kind, subject, trigger, target,
+                       "true" if r.get("basis") == "true" else "direct", r.get("note"), sleeve, into))
             rep["rules"] += 1
         for i, p in enumerate(data.get("platforms") or []):
             name = str(p.get("name") or "").strip()
@@ -277,9 +308,13 @@ def export_plan() -> dict:
         "whiskers_plan": FORMAT,
         "sleeves": [{"name": s["name"], "target": s["target"], "band": s["band"],
                      "ai_share": s["ai_share"], "is_cash": bool(s["is_cash"]),
-                     "colour": s["colour"]} for s in sleeves],
+                     "colour": s["colour"]}
+                    | {k: v for k, v in (("theme", s.get("theme")), ("why", s.get("why")),
+                                         ("change", s.get("breakers"))) if v}
+                    for s in sleeves],
         "rules": [{"kind": r["kind"], "subject": r["subject"], "trigger": r["trigger_pct"],
                    "target": r["target_pct"], "basis": r["basis"], "note": r["note"]}
+                  | ({"sleeve": r.get("sleeve"), "into": r.get("into_sleeve")} if r["kind"] in STEP_KINDS else {})
                   for r in rules],
         "platforms": [{"name": p["name"], "provider": p["provider"], "wrapper": p["wrapper"],
                        "flexible": bool(p["flexible"]), "limit": p["limit_gbp"],

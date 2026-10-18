@@ -68,13 +68,134 @@ def company_exposure(pos: list[dict], total: float, company: str) -> dict:
             "via_funds": via}
 
 
-def rule_status(pos: list[dict], totals: dict, exp: dict | None = None) -> list[dict]:
+def _companies(pos: list[dict], total: float, basis: str, skip: set[str]) -> list[dict]:
+    """Every single company held directly, with its share of everything (counting what
+    funds hold when the basis is "true"), biggest first. A holding counts as its company
+    when the company is set on it, or by its own name when it is plainly one company."""
+    from . import classify
+    groups: dict[str, dict] = {}
+    for x in pos:
+        if x["value"] is None:
+            continue
+        name = (x.get("company") or "").strip()
+        if not name and classify.is_single_company(x):
+            name = (x.get("name") or "").strip()
+        if not name or name.lower() in skip:
+            continue
+        g = groups.setdefault(name.lower(), {"company": name, "direct": 0.0})
+        g["direct"] += x["value"]
+    out = []
+    for g in groups.values():
+        value = g["direct"]
+        if basis == "true":
+            value += sum(v["value"] for v in company_exposure(pos, total, g["company"])["via_funds"])
+        if total:
+            out.append({"company": g["company"], "pct": value / total * 100, "value": value})
+    return sorted(out, key=lambda c: -c["pct"])
+
+
+def theme_lights(theme: str, market: dict | None = None) -> dict:
+    """How many of a theme's warning lights are red now, from the market reading when the
+    theme is watched, or read on the spot when it isn't."""
+    lights = [x for x in (market or {}).get("lights", []) if x.get("group") == theme]
+    if not lights:
+        from . import signals, themes
+        lights = [signals.reading(d) for d in themes.lights_for(theme)]
+    levels = [x["level"] for x in lights]
+    return {"reds": sum(1 for x in levels if x == "red"), "ambers": sum(1 for x in levels if x == "amber"),
+            "have": sum(1 for x in levels if x != "none"), "of": len(levels),
+            "red_titles": [x["title"] for x in lights if x["level"] == "red"]}
+
+
+def theme_fall(theme: str) -> dict | None:
+    """How far a theme's own index is below its high of the past year, judged on a 5-day
+    average like the lights, so one bad day can't trigger a purchase."""
+    from . import mathx, signals, themes
+    ref = (themes.LIBRARY.get(theme) or {}).get("scenario_ref")
+    if not ref:
+        return None
+    pts = signals._series(ref)
+    if len(pts) < 60:
+        return None
+    vals = [v for _, v in pts]
+    sm = mathx.sma(vals, signals.SMOOTH)
+    vals = [a if a is not None else v for a, v in zip(sm, vals)]
+    dd = mathx.drawdowns(vals, 252)
+    return {"fall": dd[-1] * 100, "as_of": pts[-1][0], "ref": ref}
+
+
+def _sleeve_values(pos: list[dict], totals: dict) -> dict[str, float]:
+    from . import allocation
+    return {r["name"]: r["value"] for r in allocation.view(pos, totals)["sleeves"]}
+
+
+def steps_done() -> dict:
+    return db.get_meta("steps_done", {}) or {}
+
+
+def mark_done(rule_id: int, on: str | None = None) -> None:
+    done = steps_done()
+    done[str(rule_id)] = on or db.today()
+    db.set_meta("steps_done", done)
+
+
+def rule_status(pos: list[dict], totals: dict, exp: dict | None = None,
+                market: dict | None = None) -> list[dict]:
     total = totals.get("total") or 0.0
     out = []
-    for r in db.rows("SELECT * FROM rules WHERE enabled=1 ORDER BY id"):
+    rules = db.rows("SELECT * FROM rules WHERE enabled=1 ORDER BY id")
+    own = {(r["subject"] or "").strip().lower() for r in rules if r["kind"] == "company_cap"}
+    values = None
+    done = steps_done()
+    cleared = False
+    for r in rules:
         trig = float(r["trigger_pct"])
         tgt = float(r["target_pct"]) if r["target_pct"] is not None else None
-        if r["kind"] == "company_cap":
+        if r["kind"] in ("theme_step", "theme_dip"):
+            # Steps agreed in calm weather: a level of their own, not a cap's.
+            if values is None:
+                values = _sleeve_values(pos, totals)
+            from_value = values.get(r.get("sleeve") or "")
+            item = {"rule": r, "detail": {"from_value": from_value, "into": r.get("into_sleeve"), "sleeve": r.get("sleeve")}}
+            if r["kind"] == "theme_step":
+                tl = theme_lights(r["subject"], market)
+                item["now"] = tl["reds"] if tl["have"] else None
+                item["detail"].update(tl)
+                at = tl["reds"] >= trig
+                if not tl["have"]:
+                    item["level"] = "none"
+                elif at:
+                    item["level"] = "red"
+                elif tl["reds"] == trig - 1 and (tl["reds"] or tl["ambers"]):
+                    item["level"] = "amber"
+                else:
+                    item["level"] = "green"
+                item["move"] = (from_value or 0.0) * (tgt if tgt is not None else 33.0) / 100
+            else:
+                tf = theme_fall(r["subject"])
+                item["now"] = tf["fall"] if tf else None
+                item["detail"].update(tf or {})
+                at = bool(tf) and tf["fall"] >= trig
+                item["level"] = ("none" if not tf else "amber" if at else
+                                 "info" if tf["fall"] >= 0.75 * trig else "green")
+                item["move"] = (tgt or 0.0) / 100 * total
+            key = str(r["id"])
+            if key in done:
+                if at:
+                    item["done"] = done[key]
+                else:
+                    # The lights have cleared since the step was taken: it applies again next time.
+                    done.pop(key)
+                    cleared = True
+            out.append(item)
+            continue
+        if r["kind"] == "any_company_cap":
+            cos = _companies(pos, total, r["basis"], own)
+            top = cos[0] if cos else None
+            item = {"rule": r, "now": top["pct"] if top else None,
+                    "detail": {"company": top["company"] if top else None, "companies": cos[:6],
+                               "over": [c for c in cos if c["pct"] > trig]}}
+        elif r["kind"] == "company_cap":
             ce = company_exposure(pos, total, r["subject"])
             now = ce["true_pct"] if r["basis"] == "true" else ce["direct_pct"]
             item = {"rule": r, "now": now, "detail": ce}
@@ -107,7 +228,70 @@ def rule_status(pos: list[dict], totals: dict, exp: dict | None = None) -> list[
             item["amber_from"] = amber_from
             item["trim"] = max(0.0, (now - back_to) / 100 * total) if now > back_to else 0.0
         out.append(item)
+    if cleared:
+        db.set_meta("steps_done", done)
     return out
+
+
+def _step_warning(s: dict) -> dict | None:
+    """A parachute step or a buying point, in the words agreed when it was set."""
+    from . import themes
+    r, d = s["rule"], s["detail"]
+    if s["level"] in ("green", "none") or s.get("done"):
+        return None
+    title_t = themes.title(r["subject"] or "")
+    note = (r["note"] or "").replace("Parachute: ", "").replace("Waiting for a fall: ", "")
+    if r["kind"] == "theme_step":
+        if s["level"] == "red":
+            title = (f"{title_t}: {d['reds']} of its {d['of']} warning lights are red — the step you agreed "
+                     f"applies")
+            detail = (f"{note[:1].upper() + note[1:] if note else ''} That is about {_money(s['move'])}: from "
+                      f"{r['sleeve']} into {r['into_sleeve']}. Red: {', '.join(d['red_titles'])}.").strip()
+        else:
+            title = f"{title_t}: {d['reds']} of {d['of']} warning lights red — one more and your agreed step applies"
+            detail = note[:1].upper() + note[1:] if note else ""
+        return {"id": f"rule:{r['id']}", "level": s["level"], "kind": "step", "title": title,
+                "detail": detail, "go": "ai"}
+    fall = s["now"] or 0.0
+    if s["level"] == "amber":
+        title = f"{title_t} is {fall:.0f}% below its high — the fall you were waiting for"
+        detail = (f"Your plan: move about {r['target_pct']:g} points ({_money(s['move'])}) from {r['sleeve']} "
+                  f"into {r['into_sleeve']}, and raise {r['into_sleeve']}'s target to match.")
+    else:
+        title = f"{title_t} is {fall:.0f}% below its high; your plan buys at {r['trigger_pct']:g}%"
+        detail = note[:1].upper() + note[1:] if note else ""
+    return {"id": f"rule:{r['id']}", "level": s["level"], "kind": "step", "title": title, "detail": detail,
+            "go": "ai"}
+
+
+def _rule_warnings(s: dict) -> list[dict]:
+    r = s["rule"]
+    if r["kind"] in ("theme_step", "theme_dip"):
+        w = _step_warning(s)
+        return [w] if w else []
+    if r["kind"] == "any_company_cap":
+        out = []
+        trig = float(r["trigger_pct"])
+        tgt = float(r["target_pct"]) if r["target_pct"] is not None else None
+        basis = " counting what your funds hold" if r["basis"] == "true" else ""
+        for c in s["detail"]["companies"]:
+            back_to = tgt if tgt is not None else trig
+            amber_from = back_to + (trig - back_to) / 2 if tgt is not None else trig * 0.9
+            if c["pct"] > trig:
+                trim = (c["pct"] - back_to) / 100 * (c["value"] / c["pct"] * 100 if c["pct"] else 0.0)
+                out.append({"id": f"rule:{r['id']}:{c['company']}", "level": "red", "kind": r["kind"],
+                            "title": f"{c['company']} is {c['pct']:.1f}% of the portfolio{basis} — over your "
+                                     f"{trig:g}% limit for any one company",
+                            "detail": (f"Your rule brings it back to {tgt:g}%: that is selling about {_money(trim)} "
+                                       "of it." if tgt is not None else (r["note"] or "")), "go": "allocation"})
+            elif c["pct"] > amber_from:
+                out.append({"id": f"rule:{r['id']}:{c['company']}", "level": "amber", "kind": r["kind"],
+                            "title": f"{c['company']} is {c['pct']:.1f}%{basis} — past halfway to your {trig:g}% "
+                                     "limit for any one company",
+                            "detail": r["note"] or "", "go": "allocation"})
+        return out
+    w = _rule_warning(s)
+    return [w] if w else []
 
 
 def _rule_warning(s: dict) -> dict | None:
@@ -152,7 +336,11 @@ def _watch_moved(pos: list[dict], totals: dict) -> dict | None:
         w = themes.watch()
         answers = (db.get_meta("builder", {}) or {}).get("answers") or {}
         cur = w.get("main")
-        if w.get("legacy") or not cur or answers.get("main_theme") not in (None, "", "auto"):
+        if w.get("legacy") or not cur or answers.get("watch_main") not in (None, "", "auto"):
+            return None
+        # A theme ridden with a parachute is watched because of the parachute, not because of
+        # how much money it carries.
+        if ((answers.get("views") or {}).get(cur) or {}).get("action") == "parachute":
             return None
         sug = themes.suggest(pos, totals)
     except Exception as e:                    # a suggestion is never worth a broken screen
@@ -174,10 +362,8 @@ def evaluate(pos: list[dict], totals: dict, alloc: dict, exp: dict | None = None
              holding_targets: list[dict] | None = None) -> list[dict]:
     out: list[dict] = []
 
-    for s in rule_status(pos, totals, exp):
-        w = _rule_warning(s)
-        if w:
-            out.append(w)
+    for s in rule_status(pos, totals, exp, market):
+        out.extend(_rule_warnings(s))
 
     for p in totals.get("platforms", []):
         if not p["total"]:

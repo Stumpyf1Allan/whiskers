@@ -160,9 +160,9 @@ CREATE TABLE IF NOT EXISTS plans(topic TEXT PRIMARY KEY, body TEXT, updated_at T
 CREATE TABLE IF NOT EXISTS snapshots(
   d TEXT PRIMARY KEY, value REAL, cash REAL, cost REAL, detail TEXT);
 
--- ---------------------------------------------------------------- 2.0: the whole picture
--- Everything below is new in 2.0 and purely additive: a 1.x copy opening this database
--- ignores these tables, so going back a version never breaks anything.
+-- ---------------------------------------------------------------- 1.1: the optional sections
+-- Everything below is purely additive: a 1.0 copy opening this database ignores these
+-- tables, so going back a version never breaks anything.
 
 -- Things owned that are not investments or cash: the house, mostly. One figure per thing,
 -- so a mortgage links to its house rather than keeping a second value that can disagree.
@@ -274,41 +274,9 @@ CREATE TABLE IF NOT EXISTS import_mappings(
   uses INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now'))
 );
 
--- Net worth once a day, everything included, so the Overall chart has a real history.
+-- Net worth once a day, counting the sections that are switched on.
 CREATE TABLE IF NOT EXISTS networth(
   d TEXT PRIMARY KEY, own REAL, owe REAL, net REAL, detail TEXT
-);
-
--- The Budget tab (off unless switched on): bank statements, categories, monthly budgets.
-CREATE TABLE IF NOT EXISTS txn_categories(
-  id INTEGER PRIMARY KEY,
-  parent TEXT NOT NULL,
-  name TEXT NOT NULL,
-  kind TEXT NOT NULL DEFAULT 'out',            -- in | out | save | transfer
-  budget REAL,                                 -- a month, in pounds; NULL = none set
-  sort INTEGER DEFAULT 0,
-  UNIQUE(parent, name)
-);
-CREATE TABLE IF NOT EXISTS txns(
-  id INTEGER PRIMARY KEY,
-  platform_id INTEGER NOT NULL REFERENCES platforms(id) ON DELETE CASCADE,
-  posted_on TEXT NOT NULL,
-  description TEXT NOT NULL,
-  amount REAL NOT NULL,                        -- the account's currency; money in is positive
-  currency TEXT DEFAULT 'GBP',
-  balance_after REAL,
-  category_id INTEGER REFERENCES txn_categories(id) ON DELETE SET NULL,
-  category_by TEXT,                            -- you | rule | builtin
-  note TEXT,
-  fingerprint TEXT NOT NULL UNIQUE,
-  created_at TEXT
-);
-CREATE INDEX IF NOT EXISTS ix_txns_on ON txns(posted_on);
-CREATE TABLE IF NOT EXISTS txn_rules(
-  id INTEGER PRIMARY KEY,
-  pattern TEXT NOT NULL UNIQUE,                -- a merchant, lower-cased, matched anywhere
-  category_id INTEGER NOT NULL REFERENCES txn_categories(id) ON DELETE CASCADE,
-  created_at TEXT
 );
 """
 
@@ -316,17 +284,24 @@ CREATE TABLE IF NOT EXISTS txn_rules(
 ADDED_COLUMNS: list[tuple[str, str, str]] = [
     # 0.2: a bank or savings account whose cash sits outside the investment plan
     ("platforms", "in_plan", "INTEGER NOT NULL DEFAULT 1"),
-    # 2.0: cash in rand (or anything else), and where the account is
+    # 1.1: cash in rand (or anything else), and where the account is
     ("platforms", "currency", "TEXT DEFAULT 'GBP'"),
     ("platforms", "country", "TEXT"),
     ("platforms", "institution", "TEXT"),        # the catalogue's id, when picked from it
     ("platforms", "fee_year", "REAL"),           # what the platform charges, £ a year
-    # 2.0: what a holding is, for the X-Ray
+    # 1.1: what a holding is, for the X-Ray
     ("instruments", "asset_class", "TEXT"),      # equity | bond | linker | cash | gold | commodity | property | crypto | mixed
     ("instruments", "duration", "REAL"),         # a bond fund's duration, years
     ("instruments", "ocf", "REAL"),              # a fund's yearly charge, %
-    # 2.0: a thesis's factor grades, typed in during a review (JSON: grades and the date)
+    # 1.1: a thesis's factor grades, typed in during a review (JSON: grades and the date)
     ("theses", "factors", "TEXT"),
+    # 1.1: why a sleeve is in the plan, in the person's own words, and the theme it rides on
+    ("sleeves", "why", "TEXT"),
+    ("sleeves", "theme", "TEXT"),
+    ("sleeves", "breakers", "TEXT"),             # what would change the person's mind
+    # 1.1: a parachute step names the sleeve it cuts and the sleeve the money goes to
+    ("rules", "sleeve", "TEXT"),
+    ("rules", "into_sleeve", "TEXT"),          # "into" is a word SQL keeps for itself
 ]
 
 _init_lock = threading.Lock()

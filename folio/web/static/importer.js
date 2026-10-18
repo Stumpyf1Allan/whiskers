@@ -7,7 +7,7 @@
    names one platform; anything else waits here for a person. */
 'use strict';
 
-VIEWS.import = { title: 'Import a file', navTitle: 'Import', sub: 'Drop a statement or holdings file here, or keep a statements folder that is read every time you press Refresh.', render: vImport };
+VIEWS.import = { title: 'Import a file', parent: 'settings', sub: 'Drop a statement or holdings file here, or keep a statements folder that is read every time you press Refresh.', render: vImport };
 
 const ACCEPT = '.csv,.tsv,.txt,.xlsx,.xlsm,.xls,.ofx,.qfx,.qif,.pdf';
 const WRAPPER_WORD = { isa: 'Stocks and shares ISA', gia: 'General investment account', sipp: 'SIPP (a pension you run)', lisa: 'Lifetime ISA' };
@@ -19,7 +19,7 @@ async function vImport(el) {
     <section class="panel">
       <div class="dropzone" id="dz" tabindex="0" role="button" aria-label="Choose a file to import">
         <div class="big">Drop a file here, or click to choose one</div>
-        <div class="small muted">Freetrade’s activity export, Trading 212’s CSV, or the holdings file from Hargreaves Lansdown, AJ Bell, interactive investor or Vanguard.${S.boot.settings.budget_on ? ' Bank statements too (CSV, OFX, QIF or PDF), for the Budget tab.' : ''} You can drop a file anywhere on the window.</div>
+        <div class="small muted">Freetrade’s activity export, Trading 212’s CSV, or the holdings file from Hargreaves Lansdown, AJ Bell, interactive investor or Vanguard. You can drop a file anywhere on the window.</div>
       </div>
       <div id="imp-result" style="margin-top:14px"></div>
     </section>
@@ -111,7 +111,7 @@ async function analyseFile(f) {
   S.importRep = r;
   const plats = r.platforms || [];
   const bank = r.kind === 'bank';
-  const canImport = !bank || S.boot.settings.budget_on;
+  const canImport = !bank;
   const choices = bank ? plats.filter(p => p.provider === 'bank') : plats.filter(p => p.provider !== 'bank');
   const preview = r.preview || [];
   const cols = preview.length ? Object.keys(preview[0]).filter(k => !k.startsWith('_')).slice(0, 8) : [];
@@ -126,7 +126,7 @@ async function analyseFile(f) {
         <button class="btn primary" data-act="imp-commit">Import it</button></div>
         ${r.suggested_platform ? '<p class="tiny muted">Chosen from the filename and the file’s layout. Change it if that’s wrong.</p>' : ''}`
       : `<p class="small">Add the ${bank ? 'bank account' : 'platform'} it comes from first, then drop the file again.</p><div class="row"><button class="btn primary" data-act="add-from-catalogue">Find your platform or account</button></div>`)
-      : '<div class="row"><button class="btn" data-go="settings">Switch on the Budget tab in Settings</button></div>'}
+      : '<p class="small">Whiskers keeps a bank account’s balance rather than its transactions: type the balance in under Settings, Cash and cards.</p><div class="row"><button class="btn" data-go="settings">Go to Settings</button></div>'}
     <p class="note">Importing a file that overlaps one already in is safe: nothing is counted twice.</p>
   </div>`;
   wire(out);
@@ -207,15 +207,15 @@ async function afterRefresh(st) {
     const last = ib.last;
     if (last && st && st.started && String(last.at) >= String(st.started)) {
       if (last.done.length) toast(`From your statements folder: ${last.done.map(x => `${x.file} → ${x.platform}`).join('; ')}.`);
-      if (last.left.length) toast(`${plural(last.left.length, 'file')} in your statements folder need${last.left.length === 1 ? 's' : ''} you. The Import screen says why.`, true);
+      if (last.left.length) toast(`${plural(last.left.length, 'file')} in your statements folder need${last.left.length === 1 ? 's' : ''} you. Settings, Import a file, says why.`, true);
     }
   } catch { /* the toast is a courtesy */ }
   checkReminder();
 }
 
-SETTINGS_PANELS.middle.push(() => `<section class="panel"><h2>Statements folder and reminder</h2>
-  <p class="lede">Where Whiskers looks for downloaded statements each time you press Refresh, and the monthly reminder to put them there. Both are on the Import screen.</p>
-  <button class="btn" data-go="import">Go to the Import screen</button></section>`);
+SETTINGS_PANELS.middle.push(() => `<section class="panel"><h2>Importing files</h2>
+  <p class="lede">Drop a statement or holdings file anywhere on the window, or keep a statements folder that Whiskers reads each time you press Refresh, with a monthly reminder to fill it.</p>
+  <button class="btn" data-go="import">Import a file</button></section>`);
 
 // ---------------------------------------------------------------------------- the catalogue
 
@@ -246,9 +246,28 @@ ACTS['cat-manual'] = () => {
     <button class="btn" data-act="bank-add">A bank or savings account</button>
     <button class="btn" data-act="card-add">A credit card</button>
     <button class="btn" data-act="cat-pension">A pension</button>
-    <button class="btn" data-act="asset-add">Your home, or something else you own</button></div>`, foot: '<button class="btn" data-act="close">Cancel</button>' });
+    <button class="btn" data-act="cat-mortgage">A mortgage</button>
+    ${SECTIONS.some(sectionOn) ? '<button class="btn" data-act="asset-add">Your home, or something else you own</button>' : ''}</div>`, foot: '<button class="btn" data-act="close">Cancel</button>' });
 };
-ACTS['cat-pension'] = () => { closeModal(); go('pensions'); };
+// Pensions and mortgages live in their own sections. Adding one offers to switch its section
+// on: until then Whiskers shows nothing of it and counts nothing.
+async function ensureSection(key) {
+  if (sectionOn(key)) return true;
+  const label = key === 'mortgage' ? 'Mortgage' : 'Retirement';
+  const ok = await confirmBox(`Switch on the ${label} section?`, key === 'mortgage'
+    ? 'Mortgages live in the Mortgage section, which is off. Switching it on adds a Mortgage screen to the sidebar and a line to the Overview: when the fixed rate ends, what paying more would save, and your home in your net worth. It can be switched off again in Settings, Sections.'
+    : 'Pensions live in the Retirement section, which is off. Switching it on adds a Retirement screen to the sidebar and a line to the Overview: your pensions, the State Pension and a year-by-year plan. It can be switched off again in Settings, Sections.',
+    `Switch it on`);
+  if (!ok) return false;
+  try { await setSection(key, true); return true; } catch (e) { toast(e.message, true); return false; }
+}
+ACTS['cat-pension'] = async () => { closeModal(); if (await ensureSection('retirement')) go('pensions'); };
+ACTS['cat-mortgage'] = async () => {
+  closeModal();
+  if (!await ensureSection('mortgage')) return;
+  go('mortgage');
+  setTimeout(() => mortgageForm(null), 400);
+};
 
 const DB_SCHEMES = /\b(nhs|teachers|civil service|local government|lgps|police|armed forces|firefighters|uss|universities superannuation|principal civil)\b/i;
 
@@ -266,7 +285,11 @@ ACTS['cat-pick'] = async b => {
       <label class="field">Its yearly platform fee, if any (£)<input type="number" id="cp-fee" min="0" step="1" placeholder="0"><span class="help">For the X-Ray’s total of what you pay. Fund charges are counted separately.</span></label>
       <label class="row small"><input type="checkbox" id="cp-flex"> A flexible ISA <span class="muted">(money taken out can go back in the same tax year)</span></label></div>`;
   } else if (s.becomes === 'bank') {
-    form = `<div class="form-grid">
+    const lends = (inst.account_types || []).includes('mortgage');
+    form = `${lends ? `<div class="row wrap small" role="radiogroup" aria-label="What you are adding" style="margin-bottom:10px">
+        <label class="row"><input type="radio" name="cp-what" value="account" checked> A current or savings account</label>
+        <label class="row"><input type="radio" name="cp-what" value="mortgage"> A mortgage${sectionOn('mortgage') ? '' : ' <span class="muted">(switches on the Mortgage section)</span>'}</label></div>` : ''}
+      <div class="form-grid" id="cp-account">
       <label class="field">Name it<input type="text" id="cp-name" value="${esc(inst.name)}"></label>
       <label class="field">Balance, in ${esc(inst.currency)}<input type="number" id="cp-bal" step="0.01"></label>
       <label class="row small full"><input type="checkbox" id="cp-inplan"> Part of my plan: count it in my Cash sleeve</label></div>
@@ -275,7 +298,7 @@ ACTS['cat-pick'] = async b => {
     form = `<div class="form-grid"><label class="field">Name it<input type="text" id="cp-name" value="${esc(inst.name)}"></label>
       <label class="field">Owed now (£)<input type="number" id="cp-owed" min="0" step="0.01"></label></div>`;
   } else if (s.becomes === 'pension') {
-    form = `<p class="small">${DB_SCHEMES.test(inst.name) ? 'This is usually a final-salary or career-average scheme: a promise of so much a year.' : 'This is usually a pension pot.'} It goes on the Retirement tab’s Pensions screen.</p>`;
+    form = `<p class="small">${DB_SCHEMES.test(inst.name) ? 'This is usually a final-salary or career-average scheme: a promise of so much a year.' : 'This is usually a pension pot.'} It goes in the Retirement section, on its Pensions page.${sectionOn('retirement') ? '' : ' That section is off; adding a pension offers to switch it on.'}</p>`;
   } else {
     form = '<p class="small">Add it with its value; update it when you have a valuation.</p>';
   }
@@ -286,12 +309,27 @@ ACTS['cat-pick'] = async b => {
     ${s.withheld.length ? `<p class="tiny muted">Not offered: ${esc(s.withheld.join('; '))}. They need a paid service or a company licence, which a household app shouldn’t ask for.</p>` : ''}
     ${form}</div>`,
     foot: `<button class="btn" data-act="add-from-catalogue">Back to the list</button><button class="btn primary" data-act="cat-add">${s.becomes === 'pension' ? 'Add the pension' : 'Add it'}</button>` });
+  $$('input[name="cp-what"]').forEach(r => r.addEventListener('change', () => {
+    const m = ($('input[name="cp-what"]:checked') || {}).value === 'mortgage';
+    const acc = $('#cp-account');
+    if (acc) acc.hidden = m;
+    const btn = $('[data-act="cat-add"]');
+    if (btn) btn.textContent = m ? 'Add the mortgage' : 'Add it';
+  }));
 };
 
 ACTS['cat-add'] = async b => {
   const s = S.catPick, inst = s.institution, za = inst.country === 'ZA';
+  if (s.becomes === 'bank' && ($('input[name="cp-what"]:checked') || {}).value === 'mortgage') {
+    closeModal();
+    if (!await ensureSection('mortgage')) return;
+    go('mortgage');
+    setTimeout(() => { mortgageForm(null); const l = $('#mf-lender'); if (l) l.value = inst.name; }, 400);
+    return;
+  }
   if (s.becomes === 'pension') {
     closeModal();
+    if (!await ensureSection('retirement')) return;
     go('pensions');
     const kind = za ? 'sa_ra' : DB_SCHEMES.test(inst.name) ? 'db' : 'dc';
     setTimeout(async () => {
@@ -300,7 +338,12 @@ ACTS['cat-add'] = async b => {
     }, 400);
     return;
   }
-  if (s.becomes === 'property') { closeModal(); assetForm({ name: inst.name, kind: 'property' }); return; }
+  if (s.becomes === 'property') {
+    closeModal();
+    if (!SECTIONS.some(sectionOn) && !await ensureSection('mortgage')) return;
+    assetForm({ name: inst.name, kind: 'property' });
+    return;
+  }
   await busy(b, async () => {
     let body;
     if (s.becomes === 'platform') {
@@ -319,7 +362,7 @@ ACTS['cat-add'] = async b => {
     if (s.provider === 'freetrade') { ftImport(r.id); return; }
     if (s.provider === 'monzo') { ACTS['monzo-connect']({ dataset: { id: r.id } }); return; }
     if (s.route === 'file') {
-      toast(`${body.name} added. Now download its file (${s.where || 'from its website'}) and drop it on this screen.`);
+      toast(`${body.name} added. Now download its file (${s.where || 'from its website'}) and drop it here.`);
       go('import');
       return;
     }

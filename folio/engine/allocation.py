@@ -80,7 +80,7 @@ def view(pos: list[dict], totals: dict) -> dict:
                      "value": v, "band": band, "band_custom": s["band"] is not None,
                      "drift": drift, "status": status, "holdings": counts[s["id"]],
                      "colour": s["colour"], "is_cash": bool(s["is_cash"]),
-                     "ai_share": s["ai_share"],
+                     "ai_share": s["ai_share"], "why": s.get("why"),
                      "gap_value": (s["target"] / 100 * total - v) if total else None})
     extra = []
     if unassigned_n:

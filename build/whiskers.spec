@@ -27,7 +27,7 @@ PKG = ROOT / "folio"
 assert (PKG / "web" / "static" / "app.js").exists(), (
     f"the app's front end is not where the spec is looking: {PKG / 'web' / 'static'}")
 
-# 2.0: the catalogue of UK and South African firms is data, read at run time, so it has
+# 1.1: the catalogue of UK and South African firms is data, read at run time, so it has
 # to be listed here or the "Find your platform" box comes up empty in a built app.
 datas = [(str(PKG / "web" / "static"), "web/static"),
          (str(PKG / "institutions" / "data"), "institutions/data")]
@@ -36,12 +36,12 @@ binaries = []
 # cffi's compiled backend is imported from C inside curl_cffi, where PyInstaller's
 # analysis cannot see it; without it the built app quietly fell back to plain Python.
 hiddenimports = ["sqlite3", "webbrowser", "json", "csv", "_cffi_backend", "cffi", "openpyxl",
-                 # 2.0's modules are imported inside functions; named here so no build can miss one
-                 "folio.web.routes2", "folio.budget", "folio.budget.categories", "folio.budget.engine",
-                 "folio.budget.ingest", "folio.importers", "folio.importers.investments",
+                 # 1.1's modules are imported inside functions; named here so no build can miss one
+                 "folio.web.routes2", "folio.importers", "folio.importers.investments",
                  "folio.importers.readers", "folio.importers.mapping", "folio.importers.profiles",
                  "folio.importers.pdfstatement", "folio.institutions", "folio.institutions.registry",
-                 "folio.institutions.websites", "folio.inbox", "folio.reminders", "folio.engine.phonecopy"]
+                 "folio.institutions.websites", "folio.inbox", "folio.reminders", "folio.engine.sections",
+                 "folio.engine.builder", "folio.engine.themes", "folio.engine.xray"]
 
 # curl_cffi carries a compiled libcurl. collect_all brings the library, its data and
 # its submodules; without it the frozen app would quietly fall back to plain urllib

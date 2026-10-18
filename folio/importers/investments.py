@@ -8,7 +8,8 @@ Three kinds arrive:
   AJ Bell, interactive investor and Vanguard let you download. A snapshot has no history,
   so it sets each holding's share count, cost and value as of the file's date, and
   replaces the previous snapshot for that platform rather than adding to it.
-* **Bank statements** — only when the Budget tab is on; otherwise the screen says so.
+* **Bank statements** are recognised and turned away kindly: Whiskers keeps a bank
+  account's balance, not its transactions, so the screen says to type the balance in.
 
 Nothing is guessed silently. Every file is analysed first and shown — what it is, which
 columns hold what, the rows it found, the platform it will go to — and only committed
@@ -269,9 +270,9 @@ def analyse(raw: bytes, filename: str) -> dict:
     if any("date" in h for h in lower) and any(w in " ".join(lower) for w in ("amount", "debit", "credit", "paid", "money")):
         rep.update(kind="bank", label="A bank statement", rows=len(table.rows),
                    preview=[dict(zip(table.header, r)) for r in table.rows[:8]])
-        if not config.settings.get("budget_on"):
-            rep["warnings"].append("This looks like a bank statement. Turn on the Budget tab in Settings to "
-                                   "import transactions; until then, type the account's balance in on its own.")
+        rep["warnings"].append("This looks like a bank statement. Whiskers keeps a bank account's balance "
+                               "rather than its transactions: type the balance in under Settings, Cash and "
+                               "cards.")
         return rep
     raise ImportError_("That doesn't look like an investment file this app knows. It needs a column of "
                        "holdings (names, tickers or ISINs) and their units or values.")
@@ -358,10 +359,8 @@ def commit(token: str, platform_id: int, as_of: str | None = None, columns: dict
                     cols[field] = table.header.index(heading)
         out = apply_holdings(plat["id"], table, cols, as_of or rep.get("as_of") or db.today())
     elif kind == "bank":
-        if not config.settings.get("budget_on"):
-            raise ImportError_("Turn on the Budget tab in Settings to import bank statements.")
-        from ..budget import ingest
-        out = ingest.import_statement(raw, filename, plat)
+        raise ImportError_("Whiskers keeps a bank account's balance, not its transactions: type the balance "
+                           "in under Settings, Cash and cards.")
     else:
         raise ImportError_("That file isn't one this app can import.")
     db.set_meta("last_import", db.now())

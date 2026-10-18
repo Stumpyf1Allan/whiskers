@@ -45,10 +45,9 @@ FORMAT = 1
 #: Parents before children, so every reference exists by the time it is inserted.
 TABLES = ("meta", "sleeves", "platforms", "instruments", "positions", "trades", "dividends",
           "cash_moves", "lookthrough", "rules", "plans", "snapshots",
-          # 2.0: the whole picture travels too
-          "assets", "mortgages", "mortgage_events", "pensions", "exposures", "theses", "networth",
-          "txn_categories", "txns", "txn_rules")
-SETTINGS = ("isa_allowance", "fscs_limit", "user_name", "show_mortgage", "show_retirement", "budget_on")
+          # 1.1: the optional sections travel too
+          "assets", "mortgages", "mortgage_events", "pensions", "exposures", "theses", "networth")
+SETTINGS = ("isa_allowance", "fscs_limit", "user_name", "show_mortgage", "show_retirement")
 #: Vault entries named after a platform's id, which a load can change.
 PLATFORM_KEYS = ("t212", "monzo")
 MIN_PASSPHRASE = 8

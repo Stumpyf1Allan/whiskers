@@ -20,7 +20,7 @@ import pytest
 
 from folio import config, db
 from folio.brokers import freetrade, monzo, symbols, tbills, trading212
-from folio.engine import (allocation, export, isa, mathx, narrative, plan, planbuilder, playbook,
+from folio.engine import (allocation, builder, export, isa, mathx, narrative, plan, playbook,
                           portfolio, rules, sample, signals, stress)
 from folio.market import sources, store
 
@@ -683,7 +683,7 @@ def test_the_spec_points_at_real_files_and_never_excludes_an_aliased_module():
 
 def test_windows_scripts_have_windows_line_endings():
     for f in (ROOT / "build" / "build_windows.bat", ROOT / "Start Whiskers.bat",
-              ROOT / "Try Whiskers 2.0 (test copy).bat"):
+              ROOT / "Try Whiskers 1.1 (test copy).bat"):
         raw = f.read_bytes()
         assert raw.count(b"\n") == raw.count(b"\r\n"), f.name
     rules = (ROOT / ".gitattributes").read_text(encoding="utf-8")
@@ -1341,51 +1341,54 @@ def test_the_big_picture_hides_amounts_and_never_forecasts():
 
 # ============================================================================ the plan builder
 
+def _fresh(answers: dict) -> dict:
+    db.set_meta("builder", {})
+    builder.save_answers(answers)
+    return builder.draft("fresh")
+
+
 @pytest.mark.parametrize("answers", [
-    {}, {"horizon": "under5", "fall": "sell", "emergency": "no"},
-    {"horizon": "over20", "fall": "buy", "db": "yes", "style": "hands",
-     "themes": list(planbuilder.THEMES), "ai_cap": "30", "platforms": ["freetrade", "trading212"],
-     "buffer": "78000"},
-    {"style": "simple", "themes": ["tech"]},
+    {}, {"need_when": "under5", "fall": "sell", "emergency": "no"},
+    {"need_when": "over20", "fall": "buy", "hands": "enjoy", "guaranteed": "most", "worries": ["bubble", "rates"],
+     "views": {k: {"believe": 5, "action": "parachute"} for k in builder.CARD_THEMES}},
+    {"hands": "funds", "views": {"ai": {"believe": 4, "action": "ride"}}},
 ])
 def test_every_built_plan_adds_up_and_loads(answers):
-    out = planbuilder.build(answers)
+    out = _fresh(answers)
     sleeves = out["plan"]["sleeves"]
     assert abs(sum(s["target"] for s in sleeves) - 100) < 1e-9
     assert all(0 < s["target"] <= 100 for s in sleeves) and sum(1 for s in sleeves if s.get("is_cash")) == 1
-    assert out["why"][-1].startswith("This is a starting point")
     sleeve("Global core", 40)                                     # a template left behind
-    rep = plan.import_plan(out["plan"])
+    rep = plan.import_plan({k: out["plan"][k] for k in ("whiskers_plan", "replace_sleeves", "sleeves")})
     assert rep["removed"] == ["Global core"] and allocation.view([], {"total": 0})["targets_add_up"]
+    plan.import_plan({"whiskers_plan": 2, "rules": out["plan"]["rules"]})     # every rule it writes loads
 
 
 def test_the_builder_keeps_more_safe_when_the_money_is_needed_soon():
-    soon = planbuilder.build({"horizon": "under5", "fall": "worry"})
-    later = planbuilder.build({"horizon": "over20", "fall": "hold", "db": "yes"})
-    assert soon["safe"] > 50 > later["safe"]
-    assert later["plan"]["rules"] == [] and not later["plan"]["platforms"]
-
+    soon = _fresh({"need_when": "under5", "fall": "worry"})
+    later = _fresh({"need_when": "over20", "fall": "hold", "guaranteed": "most"})
+    assert soon["risk"]["growth"] < 50 < later["risk"]["growth"]
+    assert later["plan"]["rules"] == []
 
 
 def test_a_retiree_drawing_income_gets_buckets_and_inflation_protection():
-    out = planbuilder.build({"horizon": "now", "withdraw": "4", "age": "65plus", "fall": "hold",
-                             "experience": "long", "prefer": "balanced"})
+    out = _fresh({"need_when": "now", "draw_rate": "4", "fall": "hold", "experience": "long", "prefer": "balanced"})
     got = {s["name"]: s["target"] for s in out["plan"]["sleeves"]}
     assert got["Cash"] == 8                          # two years of 4% withdrawals
-    assert got["Index-linked gilts"] > 0 and got["Gilts and bonds"] > 0
+    assert got["Index-linked gilts"] > 0 and got["Gilts"] > 0
     assert abs(sum(got.values()) - 100) < 1e-9
     assert "Spend from the Cash sleeve" in out["plan"]["plans"]["crash"]
-    high = planbuilder.build({"horizon": "now", "withdraw": "5"})
+    high = _fresh({"need_when": "now", "draw_rate": "5"})
     assert any("3.9%" in w for w in high["why"])
 
 
 def test_a_secure_pension_never_pushes_past_what_someone_is_willing_to_take():
-    nervous = planbuilder.build({"horizon": "over20", "guaranteed": "most", "fall": "sell",
-                                 "experience": "new", "prefer": "steady"})
-    assert nervous["growth"] <= 30 + 1e-9          # willingness caps it, however secure they are
-    bold = planbuilder.build({"horizon": "over20", "guaranteed": "most", "fall": "buy",
-                              "experience": "long", "prefer": "growth"})
-    assert bold["growth"] > 90 and all(len(x) == 2 for x in bold["sources"])
+    nervous = _fresh({"need_when": "over20", "guaranteed": "most", "fall": "sell", "experience": "new",
+                      "prefer": "steady"})
+    assert nervous["risk"]["growth"] <= 30 + 1e-9    # willingness caps it, however secure they are
+    bold = _fresh({"need_when": "over20", "guaranteed": "most", "fall": "buy", "experience": "long",
+                   "prefer": "growth"})
+    assert bold["risk"]["growth"] > 90 and all(len(x) == 2 for x in bold["sources"])
 
 
 
@@ -1409,8 +1412,8 @@ def test_the_export_has_every_sheet_with_real_figures_in_them():
     import io
     from openpyxl import load_workbook
     wb = load_workbook(io.BytesIO(export.build()))
-    # 2.0 adds Net worth always; Mortgage, Pensions and the Retirement plan only when there is one
-    assert wb.sheetnames == ["Summary", "Net worth", "Holdings", "Allocation", "Dividends", "Trades", "Cash movements"]
+    # 1.1 adds Net worth, Mortgage, Pensions and the Retirement plan only when their sections are on
+    assert wb.sheetnames == ["Summary", "Holdings", "Allocation", "Dividends", "Trades", "Cash movements"]
 
     hold = {c.value: i for i, c in enumerate(next(wb["Holdings"].iter_rows(min_row=1, max_row=1)), 1)}
     row = next(wb["Holdings"].iter_rows(min_row=2, max_row=2))

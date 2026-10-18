@@ -321,7 +321,7 @@ def findings(x: dict, pos: list[dict], tot: dict, settings: dict | None = None) 
     if rand and (rand["pct"] or 0) > 0.10 and retire_uk:
         add("amber", f"{rand['pct'] * 100:.0f}% of your money is in rand",
             "If you'll spend your retirement in pounds, rand is a currency bet as well as savings: "
-            "the rand has weakened against the pound over long periods.", "overall")
+            "the rand has weakened against the pound over long periods.", "settings")
     uk = (x.get("regions") or {}).get("uk_pct") or 0.0
     if uk > 0.25:
         add("info", f"About {uk * 100:.0f}% of your shares are in UK companies",

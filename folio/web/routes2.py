@@ -1,5 +1,5 @@
-"""The 2.0 routes: Overall, Mortgage, Retirement, the plan review, watch themes, the
-institution catalogue, importing files, the statements folder and the reminder.
+"""The 1.1 routes: the optional Mortgage and Retirement sections, the plan builder, watch
+themes, the institution catalogue, importing files, the statements folder and the reminder.
 
 Same rules as the rest of the server: every route answers JSON; a top-level "error"
 only ever means the request failed (raise ApiError for that); anything that downloads
@@ -12,24 +12,11 @@ import datetime as dt
 import json
 
 from .. import config, db, inbox, reminders
-from ..engine import (builder, classify, mortgage as mort, overall, pensions as pens, phonecopy, portfolio,
-                      retirement, statepension, stress, themes, ukrules, valuations, xray)
+from ..engine import (builder, classify, mortgage as mort, pensions as pens, portfolio, retirement,
+                      statepension, stress, themes, ukrules, xray)
 from ..importers import investments as inv
 from ..institutions import registry
 from .server import ApiError, _float, _int, route
-
-
-# ============================================================================ overall
-
-@route("GET", "/api/overall")
-def api_overall(req, m, q, body):
-    return overall.summary()
-
-
-@route("GET", "/api/export/phone")
-def api_export_phone(req, m, q, body):
-    """One HTML file of the figures, for a phone without the app (an iPhone, say)."""
-    return {"_file": phonecopy.build(), "_name": phonecopy.filename(), "_type": "text/html; charset=utf-8"}
 
 
 # ============================================================================ assets
@@ -377,7 +364,7 @@ def api_what_if(req, m, q, body):
     return retirement.project(s, data, opts)
 
 
-# ============================================================================ the plan review
+# ============================================================================ the plan builder
 
 @route("GET", "/api/builder")
 def api_builder(req, m, q, body):
@@ -386,20 +373,22 @@ def api_builder(req, m, q, body):
 
 @route("PATCH", "/api/builder")
 def api_builder_save(req, m, q, body):
-    try:
-        return builder.save_answers((body or {}).get("answers") or {})
-    except retirement.RetirementError as e:
-        raise ApiError(str(e)) from None
+    return builder.save_answers((body or {}).get("answers") or {})
 
 
 @route("GET", "/api/builder/draft")
 def api_builder_draft(req, m, q, body):
-    return builder.draft()
+    """What the answers would mean: a review of the plan in Whiskers, or a fresh plan. Saves nothing."""
+    return builder.draft(q.get("mode") or None)
 
 
 @route("POST", "/api/builder/apply")
 def api_builder_apply(req, m, q, body):
-    return builder.apply(body or {})
+    from ..engine import plan as planfile
+    try:
+        return builder.apply(body or {})
+    except planfile.PlanError as e:
+        raise ApiError(str(e)) from None
 
 
 @route("GET", "/api/builder/written")
@@ -415,6 +404,20 @@ def api_written_page(req, m, q, body):
     w = builder.written_plan()
     parts = []
     for s in w["sections"]:
+        if s.get("kind") == "cards":
+            cards = []
+            for c in s["lines"]:
+                bits = [f"<b>{html.escape(c['title'])}</b>: {html.escape(c['action'])}"
+                        + (f" &middot; believe {c['believe']}/5" if c.get("believe") else "")
+                        + (f" &middot; worried {c['worry']}/5" if c.get("worry") else "")
+                        + (f" &middot; {html.escape(c['sleeve'])} {c['target']:g}%" if c.get("sleeve") else "")]
+                if c.get("why"):
+                    bits.append(f"<div><i>Why:</i> {html.escape(c['why'])}</div>")
+                if c.get("change"):
+                    bits.append(f"<div><i>What would change my mind:</i> {html.escape(c['change'])}</div>")
+                cards.append("<li>" + "".join(bits) + "</li>")
+            parts.append(f"<h2>{html.escape(s['title'])}</h2><ul>{''.join(cards)}</ul>")
+            continue
         items = "".join(f"<li>{html.escape(str(x))}</li>" for x in s["lines"])
         parts.append(f"<h2>{html.escape(s['title'])}</h2><ul>{items}</ul>")
     page = (f"<!doctype html><html lang=\"en-GB\"><head><meta charset=\"utf-8\"><title>{html.escape(w['title'])}</title>"
@@ -422,7 +425,7 @@ def api_written_page(req, m, q, body):
             "body{font:15px/1.55 system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#15202b;"
             "max-width:760px;margin:32px auto;padding:0 20px}h1{font-size:1.7rem;margin:0 0 4px}"
             "h2{font-size:1.1rem;margin:22px 0 6px;border-bottom:1px solid #dfe4ea;padding-bottom:4px}"
-            "ul{margin:6px 0 0;padding-left:20px}li{margin:3px 0}.m{color:#6f7c8b;font-size:.9rem}"
+            "ul{margin:6px 0 0;padding-left:20px}li{margin:5px 0}.m{color:#6f7c8b;font-size:.9rem}"
             "@media print{body{margin:0}}</style></head><body>"
             f"<h1>{html.escape(w['title'])}</h1><p class=\"m\">Made {html.escape(_day(w['made']))}</p>"
             + "".join(parts) + f"<p class=\"m\" style=\"margin-top:22px\">{html.escape(w['footer'])}</p></body></html>")
@@ -430,22 +433,25 @@ def api_written_page(req, m, q, body):
             "_type": "text/html"}
 
 
-@route("GET", "/api/builder/pack")
-def api_review_pack(req, m, q, body):
-    return {"_file": builder.review_pack().encode("utf-8"),
-            "_name": f"{config.APP_FILE_NAME} review pack {db.today()}.md", "_type": "text/markdown"}
+@route("GET", "/api/builder/brief")
+def api_builder_brief(req, m, q, body):
+    """The brief to hand to Claude for a bespoke plan. Amounts only when asked for."""
+    return {"_file": builder.brief(amounts=q.get("amounts") == "1").encode("utf-8"),
+            "_name": f"{config.APP_FILE_NAME} plan brief {db.today()}.md", "_type": "text/markdown"}
 
 
-@route("GET", "/api/valuations")
-def api_valuations(req, m, q, body):
-    return {"fields": valuations.FIELDS, "values": valuations.values(), "old_after_days": valuations.OLD_AFTER_DAYS}
+@route("POST", "/api/builder/check")
+def api_builder_check(req, m, q, body):
+    """A plan file Claude (or anyone) sent back, checked before anything changes."""
+    return builder.check_plan(body if isinstance(body, (dict, bytes, bytearray, str)) else b"")
 
 
-@route("PUT", "/api/valuations")
-def api_save_valuations(req, m, q, body):
+@route("POST", "/api/builder/use-checked")
+def api_builder_use_checked(req, m, q, body):
+    from ..engine import plan as planfile
     try:
-        return {"ok": True, "values": valuations.save(body or {})}
-    except valuations.ValuationError as e:
+        return builder.use_checked(str((body or {}).get("token") or ""))
+    except (ValueError, planfile.PlanError) as e:
         raise ApiError(str(e)) from None
 
 
@@ -460,8 +466,9 @@ def api_xray(req, m, q, body):
 def api_watch(req, m, q, body):
     pos = portfolio.positions()
     tot = portfolio.totals(pos)
-    a = builder.answers()
-    care = [t for t in (a.get("believe") or []) + (a.get("worry") or []) if t in themes.LIBRARY]
+    views = (builder.answers().get("views") or {})
+    care = [t for t, v in views.items() if t in themes.LIBRARY and v.get("action") not in (None, "avoid")
+            and ((v.get("believe") or 0) >= 4 or (v.get("worry") or 0) >= 4 or v.get("action") in ("parachute", "dip"))]
     return {"watch": themes.watch(), "suggestion": themes.suggest(pos, tot, care),
             "library": [{"key": k, "label": v["label"], "about": v["about"]} for k, v in themes.LIBRARY.items()]}
 
@@ -640,82 +647,3 @@ def api_uk_rules(req, m, q, body):
 
 def _json(v) -> str:
     return json.dumps(v, default=str)
-
-
-# ============================================================================ the Budget tab
-
-def _budget_on():
-    if not config.settings.get("budget_on"):
-        raise ApiError("The Budget tab is switched off. Switch it on in Settings.")
-
-
-@route("GET", "/api/budget")
-def api_budget(req, m, q, body):
-    from ..budget import categories as bcat, engine as beng
-    _budget_on()
-    period = q.get("period") or beng.current_period()
-    try:
-        beng.bounds(period)
-    except (ValueError, TypeError):
-        raise ApiError("That month isn't valid.") from None
-    return {"month": beng.month(period), "history": beng.history(12), "accounts": beng.accounts(),
-            "categories": bcat.all_categories(), "previous": beng.shift(period, -1), "next": beng.shift(period, 1),
-            "current": beng.current_period()}
-
-
-@route("GET", "/api/budget/suggest")
-def api_budget_suggest(req, m, q, body):
-    from ..budget import engine as beng
-    _budget_on()
-    return {"items": beng.suggest_budgets(3)}
-
-
-@route("PUT", "/api/budget/categories/{cid}")
-def api_budget_set(req, m, q, body):
-    from ..budget import engine as beng
-    _budget_on()
-    beng.set_budget(_int(m["cid"]), _float((body or {}).get("budget"), "The budget", 0, 1_000_000, allow_none=True))
-    return {"ok": True}
-
-
-@route("POST", "/api/budget/categories")
-def api_budget_add_category(req, m, q, body):
-    from ..budget import categories as bcat
-    _budget_on()
-    b = body or {}
-    parent, name = str(b.get("parent") or "").strip()[:60], str(b.get("name") or "").strip()[:60]
-    kind = b.get("kind") if b.get("kind") in ("in", "out", "save", "transfer") else "out"
-    if not parent or not name:
-        raise ApiError("A category needs a group and a name.")
-    bcat.seed()
-    with db.tx() as c:
-        c.execute("INSERT OR IGNORE INTO txn_categories(parent,name,kind,sort) VALUES(?,?,?,999)", (parent, name, kind))
-    return {"ok": True}
-
-
-@route("GET", "/api/transactions")
-def api_transactions(req, m, q, body):
-    from ..budget import categories as bcat, engine as beng
-    _budget_on()
-    return {"items": beng.transactions(q.get("period") or None, q.get("q") or "", q.get("category") or "",
-                                       q.get("platform") or "", q.get("uncategorised") == "1"),
-            "categories": bcat.all_categories(), "accounts": beng.accounts()}
-
-
-@route("PATCH", "/api/transactions/{tid}")
-def api_transaction_patch(req, m, q, body):
-    from ..budget import categories as bcat
-    _budget_on()
-    b = body or {}
-    tid = _int(m["tid"])
-    out = {"ok": True}
-    if "category_id" in b:
-        cid = b.get("category_id")
-        cid = _int(cid) if cid not in (None, "") else None
-        try:
-            out = bcat.set_category(tid, cid, bool(b.get("remember")))
-        except ValueError as e:
-            raise ApiError(str(e), 404) from None
-    if "note" in b:
-        db.execute("UPDATE txns SET note=? WHERE id=?", (str(b["note"] or "")[:300] or None, tid))
-    return out
