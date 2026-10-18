@@ -84,6 +84,8 @@ def import_plan(data: dict | str | bytes) -> dict:
             theme = s.get("theme") if isinstance(s.get("theme"), str) else None
             why = str(s["why"]).strip()[:1200] if isinstance(s.get("why"), str) and s["why"].strip() else None
             change = str(s["change"]).strip()[:1200] if isinstance(s.get("change"), str) and s["change"].strip() else None
+            # A colour that isn't "#" and six hex digits counts as no colour: a new sleeve
+            # takes the palette's and a sleeve already here keeps its own.
             c.execute("INSERT INTO sleeves(name,target,band,ai_share,is_cash,colour,sort,theme,why,breakers) "
                       "VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET target=excluded.target,"
                       " band=excluded.band, ai_share=excluded.ai_share, is_cash=excluded.is_cash,"
@@ -91,7 +93,7 @@ def import_plan(data: dict | str | bytes) -> dict:
                       " theme=COALESCE(excluded.theme, sleeves.theme), why=COALESCE(excluded.why, sleeves.why),"
                       " breakers=COALESCE(excluded.breakers, sleeves.breakers)",
                       (name, target, band, _pct(s.get("ai_share"), f"{name}'s AI share", True),
-                       1 if s.get("is_cash") else 0, s.get("colour"), i, theme, why, change))
+                       1 if s.get("is_cash") else 0, allocation.colour(s.get("colour")), i, theme, why, change))
             rep["sleeves"] += 1
         if data.get("replace_sleeves"):
             # The plan is the whole list: sleeves it doesn't name (a template's "Global
@@ -308,7 +310,7 @@ def export_plan() -> dict:
         "whiskers_plan": FORMAT,
         "sleeves": [{"name": s["name"], "target": s["target"], "band": s["band"],
                      "ai_share": s["ai_share"], "is_cash": bool(s["is_cash"]),
-                     "colour": s["colour"]}
+                     "colour": allocation.colour(s["colour"])}
                     | {k: v for k, v in (("theme", s.get("theme")), ("why", s.get("why")),
                                          ("change", s.get("breakers"))) if v}
                     for s in sleeves],

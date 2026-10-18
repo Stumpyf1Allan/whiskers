@@ -23,6 +23,14 @@ from ..brokers import symbols
 PALETTE = ["#2f5bd3", "#0f8b6d", "#b35c00", "#7b3fc4", "#0e7490", "#c0392b", "#8a6d00",
            "#3d7d2c", "#a3316f", "#4b5d73", "#1f8fbf", "#9a4d2e", "#5a4fcf", "#6b8e23"]
 UNASSIGNED = "#a0a9b6"
+#: A sleeve's own colour: "#" and six hex digits, the form the colour picker gives.
+#: Colours are written into the page's HTML, CSS and SVG, so nothing else is kept.
+COLOUR = re.compile(r"#[0-9a-fA-F]{6}")
+
+
+def colour(value) -> str | None:
+    """The colour if it has that form; otherwise None, which means "use the palette"."""
+    return value if isinstance(value, str) and COLOUR.fullmatch(value) else None
 
 
 #: A band can run from a tenth of a point to the whole portfolio (100: never drifts,
@@ -39,7 +47,9 @@ def band_for(target: float, override: float | None = None) -> float:
 def sleeves() -> list[dict]:
     out = db.rows("SELECT * FROM sleeves ORDER BY sort, id")
     for i, s in enumerate(out):
-        s["colour"] = s["colour"] or PALETTE[i % len(PALETTE)]
+        # A colour saved before plans were checked (or carried over to the phone) that
+        # isn't "#" and six hex digits shows as the palette's.
+        s["colour"] = colour(s["colour"]) or PALETTE[i % len(PALETTE)]
     return out
 
 

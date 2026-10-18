@@ -777,8 +777,7 @@ def _sleeve_fields(b: dict, partial: bool) -> dict:
     if "is_cash" in b:
         out["is_cash"] = 1 if b["is_cash"] else 0
     if "colour" in b:
-        c = str(b["colour"] or "")
-        out["colour"] = c if re.fullmatch(r"#[0-9a-fA-F]{6}", c) else None
+        out["colour"] = allocation.colour(b["colour"])
     return out
 
 

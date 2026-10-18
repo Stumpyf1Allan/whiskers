@@ -22,10 +22,17 @@ const Charts = (() => {
   // SVG presentation attributes do not resolve CSS variables in every engine (Safari's
   // WebKit is what a Mac window uses), so a colour given as var(--x) is looked up and
   // written in literally. Charts are redrawn when the theme changes.
+  // Colours go into attributes and style="" text, and a sleeve's can come from a plan
+  // file, so only a plain var(--name), "#" and hex digits, or one word (currentColor)
+  // gets through. Anything else comes back as '': no colour, and no way out of the
+  // attribute. Charts.colour is the same check, for colours written in app.js.
   const cv = c => {
-    if (typeof c !== 'string' || !c.startsWith('var(')) return c;
-    const v = getComputedStyle(document.documentElement).getPropertyValue(c.slice(4, -1).trim()).trim();
-    return v || c;
+    if (typeof c !== 'string') return '';
+    if (/^var\(--[\w-]+\)$/.test(c)) {
+      const v = getComputedStyle(document.documentElement).getPropertyValue(c.slice(4, -1).trim()).trim();
+      return v || c;
+    }
+    return /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]+)$/.test(c) ? c : '';
   };
 
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
@@ -452,12 +459,12 @@ const Charts = (() => {
 
   function waffle(cells) {
     return `<div class="waffle" role="img" aria-label="One square per percent">` +
-      cells.map(c => `<i style="background:${c.colour}" title="${esc(c.name)}"></i>`).join('') + '</div>';
+      cells.map(c => `<i style="background:${cv(c.colour)}" title="${esc(c.name)}"></i>`).join('') + '</div>';
   }
 
   return {
     line: (cfg, height = 240) => place('line', cfg, height),
     bars: (cfg, height = 200) => place('bars', cfg, height),
-    mount, spark, donut, gauge, ring, strip, waffle, compact,
+    mount, spark, donut, gauge, ring, strip, waffle, compact, colour: cv,
   };
 })();

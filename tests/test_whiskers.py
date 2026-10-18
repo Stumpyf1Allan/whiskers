@@ -11,6 +11,8 @@ import datetime as dt
 import json
 import pathlib
 import re
+import shutil
+import subprocess
 import threading
 import urllib.error
 import urllib.parse
@@ -512,6 +514,66 @@ def test_bad_plans_are_refused_with_a_reason(bad):
         plan.import_plan(bad)
 
 
+# A sleeve's colour is written into the page's HTML, CSS and SVG, and a plan file can come
+# from anywhere: a brief returned by Claude, a file somebody sends. Until 1.1 a plan's
+# colour was saved as it stood. The first of these then closed its attribute on every
+# screen and added markup; the second turned the waffle's squares into a layer over the
+# whole window that took every click.
+HOSTILE_COLOURS = [
+    '#0b6e6e"><b class="inj">x</b><i x="', "#2e7d32;position:fixed;inset:0;z-index:99",
+    "\"><svg onload='alert(1)'>", "</style><b>x</b>", "url(x)", 'var(--x" onload="y)',
+    "var(--accent)", "red", "#fff", "#12345", "#1234567", "#gggggg", "#000000\n", " #000000",
+    "", 123456, ["#000000"], {"colour": "#000000"}, True]
+
+
+def test_a_plan_keeps_a_proper_colour_and_round_trips_it():
+    plan.import_plan({"whiskers_plan": 1, "sleeves": [
+        {"name": "Core", "target": 60, "colour": "#1A2b3C"}, {"name": "Cash", "target": 40, "is_cash": True}]})
+    assert db.scalar("SELECT colour FROM sleeves WHERE name='Core'") == "#1A2b3C"
+    assert [s["colour"] for s in allocation.sleeves()] == ["#1A2b3C", allocation.PALETTE[1]]
+    out = plan.export_plan()
+    assert [s["colour"] for s in out["sleeves"]] == ["#1A2b3C", None]
+    plan.import_plan(out)                            # a saved copy loads back as it was
+    assert plan.export_plan()["sleeves"] == out["sleeves"]
+
+
+@pytest.mark.parametrize("given", [{}, {"colour": None}] + [{"colour": c} for c in HOSTILE_COLOURS])
+def test_a_new_sleeve_without_a_proper_colour_takes_the_palettes_and_the_plan_still_loads(given):
+    rep = plan.import_plan({"whiskers_plan": 2, "sleeves": [{"name": "Core", "target": 100, **given}]})
+    assert rep["sleeves"] == 1
+    assert db.scalar("SELECT colour FROM sleeves WHERE name='Core'") is None
+    assert allocation.sleeves()[0]["colour"] == allocation.PALETTE[0]
+    assert plan.export_plan()["sleeves"][0]["colour"] is None
+
+
+def test_a_plan_without_a_proper_colour_leaves_a_sleeves_own_colour_alone():
+    """Loading a plan again from a file with no colours, or a bad one, keeps each sleeve's
+    colour. A proper colour in the file replaces it."""
+    def load(**colour):
+        plan.import_plan({"whiskers_plan": 1, "sleeves": [{"name": "Core", "target": 100, **colour}]})
+        return db.scalar("SELECT colour FROM sleeves WHERE name='Core'")
+    assert load(colour="#123456") == "#123456"
+    for again in ({}, {"colour": None}, {"colour": HOSTILE_COLOURS[0]}, {"colour": "#fff"}):
+        assert load(**again) == "#123456", again
+    assert load(colour="#ABCDEF") == "#ABCDEF"
+
+
+def test_a_bad_colour_already_saved_is_never_handed_on():
+    """A copy that loaded such a plan before 1.1 checked colours, or the phone's copy of
+    it, still has the colour saved: the screens get the palette's, and a saved plan none."""
+    pid = add_platform()
+    add_position(pid, "VWRP", "LSE", broker_value=1000, valued_at=db.now())
+    sid = sleeve("Core", 100)
+    db.execute("UPDATE sleeves SET colour=? WHERE id=?", (HOSTILE_COLOURS[0], sid))
+    db.execute("UPDATE instruments SET sleeve_id=?", (sid,))
+    pos = portfolio.positions()
+    v = allocation.view(pos, portfolio.totals(pos))
+    shown = ([s["colour"] for s in allocation.sleeves()] + [r["colour"] for r in v["sleeves"]] +
+             [c["colour"] for c in allocation.waffle(v)] + [r["colour"] for r in allocation.new_money(500, v)])
+    assert len(shown) == 103 and set(shown) == {allocation.PALETTE[0]}
+    assert plan.export_plan()["sleeves"][0]["colour"] is None
+
+
 def test_loading_the_sample_twice_does_not_build_a_second_portfolio():
     """Mittens & Pence's sample doubled the household when loaded twice."""
     sample.load()
@@ -591,6 +653,33 @@ def test_every_screen_answers_with_the_sample_loaded(server):
         assert status == 200, (path, body[:300])
 
 
+def _colours(x) -> list:
+    """Every value under a "colour" key in an API reply, however deep."""
+    if isinstance(x, dict):
+        return [v for k, v in x.items() if k == "colour"] + [c for v in x.values() for c in _colours(v)]
+    return [c for v in x for c in _colours(v)] if isinstance(x, list) else []
+
+
+def test_every_colour_the_screens_draw_is_six_hex_digits(server):
+    """However a bad colour got into the database, the screens are sent the palette's. The
+    sleeve form still turns a bad colour into none, as it always has."""
+    pid = add_platform()
+    add_position(pid, "VWRP", "LSE", broker_value=1000, valued_at=db.now())
+    sid = sleeve("Core", 100)
+    db.execute("UPDATE sleeves SET colour=? WHERE id=?", (HOSTILE_COLOURS[0], sid))
+    db.execute("UPDATE instruments SET sleeve_id=?", (sid,))
+    ok = {"Content-Type": "application/json"}
+    replies = [_req(server, p) for p in ("/api/overview", "/api/allocation", "/api/holdings", "/api/settings")]
+    replies.append(_req(server, "/api/allocation/new-money", "POST", ok, b'{"amount": 500}'))
+    for status, body, _ in replies:
+        assert status == 200, body[:200]
+        colours = _colours(json.loads(body))
+        assert colours and all(re.fullmatch(r"#[0-9a-fA-F]{6}", c) for c in colours), colours
+    for sent, saved in ((HOSTILE_COLOURS[0], None), ("#A1b2C3", "#A1b2C3"), ("#fff", None)):
+        assert _req(server, f"/api/sleeves/{sid}", "PATCH", ok, json.dumps({"colour": sent}).encode())[0] == 200
+        assert db.scalar("SELECT colour FROM sleeves WHERE id=?", (sid,)) == saved
+
+
 # ============================================================================ front-end contracts
 
 def _static(name):
@@ -633,6 +722,67 @@ def test_no_chart_uses_an_svg_title_which_nothing_can_blur():
         code = re.sub(r"/\*.*?\*/", "", _static(name), flags=re.S)
         code = re.sub(r"(?m)^\s*//.*$", "", code)
         assert "<title" not in code, name
+
+
+def test_a_colour_from_the_server_is_checked_before_it_goes_into_the_page():
+    """Written into style="..." or an SVG attribute as it stands, '#000"><b>…' would close
+    the attribute and add markup, so a colour the server sends goes in only through the
+    charts' check (Charts.colour, or cv inside charts.js). It holds even if a bad colour
+    ever got past the server's own check."""
+    for name in _scripts():
+        for expr in re.findall(r"\$\{([^{}]*[._]colour\b[^{}]*)\}", _static(name)):
+            assert expr.startswith(("Charts.colour(", "cv(")), (name, expr)
+
+
+def test_the_colour_check_in_charts_js_lets_only_plain_colours_through(tmp_path):
+    """Runs charts.js in Node, where Node is installed (GitHub's build machines have it):
+    hostile colours come back as no colour, and the donut and waffle drawn with them hold
+    only their own elements."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node isn't installed here")
+    check = tmp_path / "check.js"
+    check.write_text(r"""
+const fs = require('fs'), vm = require('vm');
+const page = { ResizeObserver: class { observe() {} }, document: { documentElement: {} },
+               getComputedStyle: () => ({ getPropertyValue: n => (n === '--accent' ? ' #0b6e6e' : '') }) };
+vm.createContext(page);
+vm.runInContext(fs.readFileSync(process.argv[2], 'utf8') + '\nthis.Charts = Charts;', page);
+const C = page.Charts, bad = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+process.stdout.write(JSON.stringify({
+  good: ['#0b6e6e', '#ABCDEF', '#fff', 'var(--accent)', 'currentColor', 'var(--nope)'].map(C.colour),
+  bad: bad.map(C.colour),
+  donut: C.donut(bad.map(c => ({ value: 1, color: c })), { inner: bad.map(c => ({ value: 1, color: c })) }),
+  waffle: C.waffle(bad.map(c => ({ name: 'x', colour: c }))),
+}));
+""", encoding="utf-8")
+    colours = tmp_path / "colours.json"
+    colours.write_text(json.dumps(HOSTILE_COLOURS), encoding="utf-8")
+    run = subprocess.run([node, str(check), str(STATIC / "charts.js"), str(colours)],
+                         capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert run.returncode == 0, run.stderr
+    out = json.loads(run.stdout)
+    assert out["good"] == ["#0b6e6e", "#ABCDEF", "#fff", "#0b6e6e", "currentColor", "var(--nope)"]
+    plain = re.compile(r"#[0-9a-fA-F]{3,8}|[a-zA-Z]+|var\(--[\w-]+\)|")
+    assert all(isinstance(c, str) and plain.fullmatch(c) for c in out["bad"]), out["bad"]
+    assert out["bad"][:6] == [""] * 6                # the ones carrying markup or CSS
+    n = len(HOSTILE_COLOURS)
+    assert set(re.findall(r"<(\w+)", out["donut"])) == {"svg", "circle", "path"}
+    assert out["donut"].count("<path") == 2 * n
+    assert all(plain.fullmatch(s) for s in re.findall(r'stroke="([^"]*)"', out["donut"]))
+    assert set(re.findall(r"<(\w+)", out["waffle"])) == {"div", "i"} and out["waffle"].count("<i ") == n
+    assert all(re.fullmatch(r"background:(#[0-9a-fA-F]{3,8}|[a-zA-Z]*)", s)
+               for s in re.findall(r'style="([^"]*)"', out["waffle"]))
+
+
+def test_a_confirmation_shows_its_message_as_text():
+    """confirmBox() builds the dialog as HTML, so its message is escaped like its button:
+    a message that one day carries a name or a file's words can't add markup to it. The
+    title was already set as text."""
+    app = _static("app.js")
+    box = re.search(r"\nfunction confirmBox\(.*?\n}\n", app, re.S).group(0)
+    assert "${esc(text)}" in box and "${text}" not in box and "${esc(ok)}" in box
+    assert "$('#modal-title').textContent = title;" in app
 
 
 def test_every_button_action_has_a_handler():

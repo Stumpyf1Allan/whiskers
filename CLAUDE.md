@@ -24,7 +24,7 @@ names, account details or keys.
 
 ## Branches
 
-- `main`: the released version, 1.1.0 (optional Mortgage and Retirement sections, the plan
+- `main`: the released version, 1.1.1 (optional Mortgage and Retirement sections, the plan
   builder; docs/WHISKERS-1.1.md describes it). Start new work on a branch from `main`.
 - `mega`: the abandoned 2.0 experiment, kept as a box of parts. Never merge it.
 
