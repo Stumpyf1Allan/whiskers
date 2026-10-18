@@ -256,7 +256,7 @@ ACTS.close = closeModal;
 
 function confirmBox(title, text, ok = 'Continue', danger = false) {
   return new Promise(resolve => {
-    openModal({ title, body: `<p style="max-width:60ch">${text}</p>`,
+    openModal({ title, body: `<p style="max-width:60ch">${esc(text)}</p>`,
       foot: `<button class="btn" data-act="cb-no">Cancel</button><button class="btn ${danger ? 'danger' : 'primary'}" data-act="cb-yes">${esc(ok)}</button>` });
     ACTS['cb-no'] = () => { closeModal(); resolve(false); };
     ACTS['cb-yes'] = () => { closeModal(); resolve(true); };
@@ -577,7 +577,7 @@ function allocationCard(a, t) {
         <div class="row" style="margin-bottom:6px"><span class="lvl ${r.status}"></span><span class="grow">${esc(r.name)}</span>
         <span class="num">${pts(r.actual)} <span class="muted">/ ${pts(r.target, 0)}</span></span></div>`).join('') :
         '<p>Every sleeve is inside its band.</p>') : '<p>No sleeves yet. Load your plan in Settings.</p>'}
-        ${a.extra.map(r => `<div class="row"><span class="lvl" style="background:${r.colour}"></span><span class="grow">${esc(r.name)}</span><span class="num">${pts(r.actual)}</span></div>`).join('')}
+        ${a.extra.map(r => `<div class="row"><span class="lvl" style="background:${Charts.colour(r.colour)}"></span><span class="grow">${esc(r.name)}</span><span class="num">${pts(r.actual)}</span></div>`).join('')}
       </div>
     </div>
   </section>`;
@@ -721,7 +721,7 @@ async function vHoldings(el) {
   const body = [...groups.values()].filter(g => g.rows.length).map(g => {
     g.rows.sort((a, b) => (b.value || 0) - (a.value || 0));
     const sub = g.rows.reduce((a, r) => a + (r.value || 0), 0);
-    return `<tr class="group"><td colspan="3"><span class="lvl" style="background:${g.sleeve.colour}"></span>${esc(g.sleeve.name)} <span class="muted small">${plural(g.rows.length, 'holding')}</span></td>
+    return `<tr class="group"><td colspan="3"><span class="lvl" style="background:${Charts.colour(g.sleeve.colour)}"></span>${esc(g.sleeve.name)} <span class="muted small">${plural(g.rows.length, 'holding')}</span></td>
       <td class="r">${money(sub)}</td><td class="r num">${total ? pct(sub / total) : ''}${known(g.sleeve.target) ? ` <span class="muted small">of ${pts(g.sleeve.target, 0)}</span>` : ''}</td><td colspan="3"></td></tr>` +
       g.rows.map(holdingRow).join('');
   }).join('');
@@ -1034,7 +1034,7 @@ async function vAllocation(el) {
         <section class="panel"><h2>Every pound, as a hundred squares</h2>
           <p class="lede">Each square is 1% of everything, cash included.</p>
           <div class="row" style="align-items:flex-start;gap:18px;flex-wrap:wrap">${Charts.waffle(d.waffle)}
-            <div class="legend" style="display:grid;gap:3px">${v.sleeves.concat(v.extra).filter(r => r.actual > 0).map(r => `<span><i style="background:${r.colour}"></i>${esc(r.name)} <span class="muted">${pts(r.actual, 0)}</span></span>`).join('')}</div></div>
+            <div class="legend" style="display:grid;gap:3px">${v.sleeves.concat(v.extra).filter(r => r.actual > 0).map(r => `<span><i style="background:${Charts.colour(r.colour)}"></i>${esc(r.name)} <span class="muted">${pts(r.actual, 0)}</span></span>`).join('')}</div></div>
         </section>
         <section class="panel"><h2>Put new money to work</h2>
           <p class="lede">Paying into the sleeves that are furthest under target fixes drift without selling anything.</p>
@@ -1143,7 +1143,7 @@ ACTS['new-money'] = async b => {
     const r = await api('/api/allocation/new-money', { method: 'POST', body: { amount } });
     const rows = r.split.filter(s => s.amount >= 0.5).sort((a, c) => c.amount - a.amount);
     $('#nm-out').innerHTML = `<table class="small"><thead><tr><th>Sleeve</th><th class="r">Put in</th><th class="r">Then</th></tr></thead><tbody>${rows.map(s => `
-      <tr><td><span class="lvl" style="background:${s.colour};margin-right:6px"></span>${esc(s.name)}</td><td class="r">${money(s.amount, { dp: 0 })}</td>
+      <tr><td><span class="lvl" style="background:${Charts.colour(s.colour)};margin-right:6px"></span>${esc(s.name)}</td><td class="r">${money(s.amount, { dp: 0 })}</td>
       <td class="r num">${pts(s.from_pct)} <span class="muted">to</span> ${pts(s.to_pct)} <span class="muted">(${pts(s.target, 0)})</span></td></tr>`).join('')}</tbody></table>
       <p class="note" style="margin-top:6px">Arithmetic on your own targets, not advice. It says nothing about which holding inside a sleeve to buy.</p>`;
   });
@@ -1505,7 +1505,7 @@ async function vSettings(el) {
           <td class="r"><input type="number" data-f="band" value="${x.band ?? ''}" step="0.25" min="0.1" placeholder="${Math.max(0.25, Math.min(5, 0.25 * x.target)).toFixed(2)}" style="width:80px"></td>
           <td class="r"><input type="number" data-f="ai_share" value="${x.ai_share ?? ''}" step="5" min="0" max="100" placeholder="per holding" style="width:120px"></td>
           <td><input type="checkbox" data-f="is_cash" ${x.is_cash ? 'checked' : ''} aria-label="Cash sleeve"></td>
-          <td><input type="color" data-f="colour" value="${x.colour}" aria-label="Colour"></td>
+          <td><input type="color" data-f="colour" value="${Charts.colour(x.colour)}" aria-label="Colour"></td>
           <td class="r"><button class="btn small ghost danger" data-act="sleeve-del" data-id="${x.id}">Remove</button></td></tr>`).join('')}
       </tbody></table></div>
       <div class="spread" style="margin-top:10px"><span class="${Math.abs(tsum - 100) < 0.01 ? 'muted' : 'warnline'} small">Targets add up to ${+tsum.toFixed(2)}%${Math.abs(tsum - 100) < 0.01 ? '.' : ', not 100%.'}</span>
