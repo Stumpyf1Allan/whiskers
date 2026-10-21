@@ -24,6 +24,7 @@ names, account details or keys.
 
 ## Branches
 
+- `news`: 1.2.0 work in progress (the Overview's News panel); not released.
 - `main`: the released version, 1.1.1 (optional Mortgage and Retirement sections, the plan
   builder; docs/WHISKERS-1.1.md describes it). Start new work on a branch from `main`.
 - `mega`: the abandoned 2.0 experiment, kept as a box of parts. Never merge it.
@@ -38,7 +39,7 @@ names, account details or keys.
 | `folio/sync.py` | The phone's copy through OneDrive: `TABLES` and `SETTINGS` that travel |
 | `folio/engine/` | The calculations: `portfolio`, `allocation`, `rules` (caps, parachute steps), `plan` (plan files), `builder` (the plan builder), `sections`, `retirement`, `pensions`, `statepension`, `mortgage`, `themes`, `signals`, `classify`, `xray`, `stress`, `export`, `ukrules` (dated UK figures, with sources) |
 | `folio/brokers/` | Trading 212, Freetrade, Monzo. Read-only: a test fails if an order call appears |
-| `folio/market/` | Prices: `sources.py`, `store.py`, `catalogue.py` (the series) |
+| `folio/market/` | Prices: `sources.py`, `store.py`, `catalogue.py` (the series); `news.py` (the Overview's News: five outlets' feeds, grouped and ranked, kept in the device-only `news` table) |
 | `folio/importers/`, `inbox.py`, `reminders.py` | Files in, the statements folder, the monthly reminder |
 | `folio/institutions/` | The list of UK and South African firms |
 | `folio/web/server.py` | The HTTP server, `@route`, `ApiError`, `SETTABLE` (settings the page may change) |
@@ -46,7 +47,7 @@ names, account details or keys.
 | `folio/web/static/` | `index.html`; `app.js` (the core: `VIEWS`, `ACTS`, `wire()`, `render()`, `SETTINGS_PANELS`); `builder.js`, `mortgage.js`, `retirement.js`, `importer.js`, which load after `app.js` and add their own `VIEWS` and `ACTS`; `charts.js`; `styles.css` |
 | `android/` | The Android app (`android/RELEASE.md`) |
 | `build/` | `whiskers.spec` (PyInstaller: add new modules to `hiddenimports`), `build_windows.bat` |
-| `tests/` | pytest: `test_whiskers.py` (core), `test_sections.py` (1.1), `test_sync.py`, `test_updates.py` |
+| `tests/` | pytest: `test_whiskers.py` (core), `test_sections.py` (1.1), `test_sync.py`, `test_updates.py`, `test_news.py` (1.2) |
 
 ## Running and testing
 

@@ -26,7 +26,7 @@ from .. import android, config, db, inbox, net, security, sync, updates
 from ..brokers import freetrade, monzo, symbols, trading212
 from ..engine import (allocation, export, isa, mathx, narrative, plan, playbook, portfolio, rules, sample,
                       sections, signals, stress, themes)
-from ..market import catalogue, sources, store
+from ..market import catalogue, news, sources, store
 
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
 
@@ -91,7 +91,7 @@ def api_bootstrap(req, m, q, body):
         "settings": {k: s.get(k) for k in ("user_name", "toured", "help_email", "isa_allowance",
                                            "fscs_limit", "refresh_on_open", "theme",
                                            "hide_amounts", "show_mortgage", "show_retirement",
-                                           "text_size")},
+                                           "show_news", "text_size")},
         "watch": {k: v for k, v in themes.watch().items() if k in ("main", "themes", "legacy")}
                  | {"title": themes.title(themes.watch()["main"])},
         "vault": security.storage_backend(),
@@ -581,7 +581,7 @@ def api_settings(req, m, q, body):
 
 SETTABLE = {"user_name", "isa_allowance", "fscs_limit", "refresh_on_open", "stooq_key",
             "check_for_updates", "auto_download_updates", "update_url", "toured", "theme",
-            "hide_amounts", "show_mortgage", "show_retirement", "reminder_day",
+            "hide_amounts", "show_mortgage", "show_retirement", "show_news", "reminder_day",
             "reminder_on", "statements_folder", "text_size"}
 
 
@@ -602,7 +602,7 @@ def api_patch_settings(req, m, q, body):
         raise ApiError("Unknown theme.")
     if "text_size" in incoming and incoming["text_size"] not in ("normal", "larger", "largest"):
         raise ApiError("Unknown text size.")
-    for k in ("hide_amounts", "show_mortgage", "show_retirement", "reminder_on"):
+    for k in ("hide_amounts", "show_mortgage", "show_retirement", "show_news", "reminder_on"):
         if k in incoming:
             incoming[k] = bool(incoming[k])
     if "reminder_day" in incoming:
@@ -981,6 +981,18 @@ def api_refresh_state(req, m, q, body):
     return store.job_state()
 
 
+# ============================================================================ news
+
+@route("GET", "/api/news")
+def api_news(req, m, q, body):
+    """The Overview's News list. Answers at once from what is kept; a visit that finds it old
+    starts a fetch in the background (`refresh=1` is the Refresh button: not within 2 minutes)."""
+    if not config.settings.get("show_news", True):
+        return {"enabled": False}
+    news.refresh(force=q.get("refresh") == "1")
+    return news.state()
+
+
 # ============================================================================ updates, links
 
 @route("GET", "/api/update")
@@ -1128,7 +1140,7 @@ def api_sync_stop(req, m, q, body):
 
 
 #: Requests that change nothing the phone's copy holds, or that look after it themselves.
-_NOT_A_CHANGE = ("/api/sync", "/api/update", "/api/refresh", "/api/open-", "/api/check-symbol",
+_NOT_A_CHANGE = ("/api/sync", "/api/news", "/api/update", "/api/refresh", "/api/open-", "/api/check-symbol",
                  "/api/retirement/what-if", "/api/import/analyse", "/api/inbox/open",
                  "/api/plan/build", "/api/allocation/new-money")
 

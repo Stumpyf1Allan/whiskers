@@ -166,3 +166,18 @@ the sections if you switch them on.
   for testing offline.
 - The data folder, the keychain service name and the update address are unchanged, so a
   1.0 copy updates in place and keeps everything.
+
+## 1.2: News on the Overview
+
+- A News panel under *The big picture*: the day's five biggest business stories. Each
+  headline opens the outlet's own page in your browser.
+- Five outlets, read from their free public feeds: BBC News, The Guardian, Sky News, AP and
+  CNBC (`market/news.py`). Stories under 24 hours old; videos, newsletters and opinion are
+  dropped; the same story from several outlets counts once and ranks by how many carry it.
+  No topic is favoured.
+- Fetched in the background when the Overview opens and the list is over 15 minutes old,
+  every 15 minutes while it stays open, and on Refresh (not within 2 minutes). One outlet down
+  leaves the other four; all down leaves the last list. Kept in the `news` table on this device
+  only; it does not travel to the phone's copy, but the `show_news` switch does.
+- Settings, News: the switch, and whether each outlet is working.
+

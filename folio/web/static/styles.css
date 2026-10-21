@@ -669,3 +669,10 @@ html[data-text="larger"] { font-size: 112.5%; }
 html[data-text="larger"] body { font-size: 15.75px; }
 html[data-text="largest"] { font-size: 125%; }
 html[data-text="largest"] body { font-size: 17.5px; }
+
+/* News on the Overview */
+.news-list { display: grid; gap: 4px; margin-top: 8px; }
+.news-item { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px;
+             color: var(--ink); text-decoration: none; }
+.news-item:hover { border-color: var(--muted); }
+.news-item b { font-weight: 600; line-height: 1.3; }
