@@ -326,6 +326,7 @@ function toggleHide() {
 // ---------------------------------------------------------------------------- refresh
 
 async function startRefresh(force = false) {
+  loadNews(true);
   try {
     await api('/api/refresh', { method: 'POST', body: { force } });
     pollRefresh();
@@ -417,7 +418,7 @@ async function vOverview(el) {
         <div class="alerts" style="margin-top:8px">${warn.length ? warn.map(alertRow).join('') :
           '<p class="none-state">Nothing needs a look. Every sleeve is inside its band and no rule is tripped.</p>'}</div>
       </section>
-      <div class="stack">${miniMonitor(d.market, d.exposure, d.playbook, d.watch_exposure)}${bigPicture(d.big_picture)}</div>
+      <div class="stack">${miniMonitor(d.market, d.exposure, d.playbook, d.watch_exposure)}${bigPicture(d.big_picture)}${newsPanel()}</div>
     </div>
 
     <section class="panel">
@@ -548,6 +549,48 @@ function bigPicture(b) {
     <p class="note" style="margin-top:10px">Written from today\u2019s readings by fixed rules. Not advice.</p>
   </section>`;
 }
+
+// News: the day's five biggest business stories. Drawn after the Overview is on screen, so
+// the Overview never waits for it; the server answers from what it keeps and fetches in the
+// background when that is more than 15 minutes old.
+const newsPanel = () => S.boot.settings.show_news === false ? '' : `<section class="panel" id="news-panel">
+    <div class="spread"><h2>News</h2><span class="tiny muted" id="news-upd"></span></div>
+    <div id="news-body" class="news-list"><p class="none-state">Loading the news…</p></div>
+    <p class="note" style="margin-top:10px">The day’s biggest business stories, picked by how many of five outlets carry each. Headlines open the outlet’s own page. Not advice.</p>
+  </section>`;
+async function loadNews(refresh) {
+  clearTimeout(S.newsTimer);
+  if (!$('#news-body')) return;
+  let n;
+  try { n = await api('/api/news' + (refresh ? '?refresh=1' : '')); } catch { return; }
+  const body = $('#news-body');
+  if (!body) return;                       // moved to another screen meanwhile
+  if (n.enabled === false) { const p = $('#news-panel'); if (p) p.remove(); return; }
+  const device = onAndroid() ? 'phone' : 'computer';
+  body.innerHTML = n.items.length ? n.items.map(i => `
+    <a class="news-item" href="${esc(i.url)}" rel="noopener noreferrer">
+      <b>${esc(i.title)}</b>
+      <span class="tiny muted">${esc(i.source)} · ${esc(ago(i.published))}${i.outlets > 1 ? ` · ${i.outlets} outlets` : ''}</span></a>`).join('')
+    : `<p class="none-state">${n.fetching || !n.updated ? 'Fetching the news…'
+      : n.failed ? `News will appear when this ${device} is online.` : 'No business stories from the last 24 hours yet.'}</p>`;
+  const upd = $('#news-upd');
+  if (upd) upd.textContent = n.items.length && n.failed ? 'Couldn’t update just now'
+    : n.updated ? `Updated ${ago(n.updated)}` : '';
+  // Look again soon while a fetch is running, otherwise in 15 minutes while this screen stays open.
+  S.newsTimer = setTimeout(() => loadNews(false), n.fetching || !n.updated ? 4000 : 15 * 60 * 1000);
+}
+// A screen is built off to the side and put on the page afterwards, so News starts once it is there.
+document.addEventListener('whiskers:rendered', () => { if ($('#news-body')) loadNews(false); });
+ACTS['news-toggle'] = async b => {
+  try {
+    await api('/api/settings', { method: 'PATCH', body: { show_news: b.checked } });
+    S.boot.settings.show_news = b.checked;
+    toast(b.checked ? 'News is on: it’s on the Overview.' : 'News is off. Nothing is fetched.');
+  } catch (e) { toast(e.message, true); b.checked = !b.checked; }
+};
+const newsStatusRows = n => !n || n.enabled === false ? '' : `<dl class="kv" style="margin-top:8px">${n.status.map(o =>
+  `<dt>${esc(o.name)}</dt><dd>${!o.checked ? 'Not fetched yet' : o.ok ? `Working${o.newest ? `, newest story ${esc(ago(o.newest))}` : ''}`
+    : `<span class="warnline">${esc(o.error === 'offline' ? 'Couldn’t connect' : o.error)}</span>`}</dd>`).join('')}</dl>`;
 
 // Narratives come from the server as plain text with pound amounts in [[ ]]; those
 // become private figures, so "Hide amounts" blurs them like every other.
@@ -1485,6 +1528,7 @@ async function vActivity(el) {
 async function vSettings(el) {
   const d = await api('/api/settings');
   const up = await api('/api/update').catch(() => null);
+  const nw = await api('/api/news').catch(() => null);
   const s = d.settings;
   const tsum = d.sleeves.reduce((a, x) => a + x.target, 0);
   const extra = where => (SETTINGS_PANELS[where] || []).map(f => { try { return f(d); } catch (e) { return ''; } }).join('');
@@ -1530,6 +1574,11 @@ async function vSettings(el) {
         <label><input type="checkbox" data-act="section-toggle" data-key="retirement" ${s.show_retirement ? 'checked' : ''}><span><b>Retirement</b><br><span class="small muted">Your pensions, the State Pension, and a year-by-year plan to the end of retirement.</span></span></label>
       </div>
       <p class="note" style="margin-top:8px">Switching one off deletes nothing: what you entered comes back when you switch it on again.</p>
+    </section>
+    <section class="panel"><h2>News</h2>
+      <p class="lede">The Overview\u2019s News panel: the day\u2019s five biggest business stories, from the BBC, The Guardian, Sky News, AP and CNBC. Whiskers reads each outlet\u2019s free public feed itself, shows only the headline and links to the outlet\u2019s own page.</p>
+      <div class="checks"><label><input type="checkbox" data-act="news-toggle" ${s.show_news !== false ? 'checked' : ''}><span><b>Show News on the Overview</b><br><span class="small muted">Off means nothing is fetched.</span></span></label></div>
+      ${newsStatusRows(nw)}
     </section>
     <section class="panel"><h2>Text size</h2>
       <p class="lede">Larger text is easier to read; charts keep their size. On a computer, Ctrl and + also zooms the whole window.</p>

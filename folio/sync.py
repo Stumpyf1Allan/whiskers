@@ -47,7 +47,8 @@ TABLES = ("meta", "sleeves", "platforms", "instruments", "positions", "trades", 
           "cash_moves", "lookthrough", "rules", "plans", "snapshots",
           # 1.1: the optional sections travel too
           "assets", "mortgages", "mortgage_events", "pensions", "exposures", "theses", "networth")
-SETTINGS = ("isa_allowance", "fscs_limit", "user_name", "show_mortgage", "show_retirement")
+SETTINGS = ("isa_allowance", "fscs_limit", "user_name", "show_mortgage", "show_retirement",
+            "show_news")
 #: Vault entries named after a platform's id, which a load can change.
 PLATFORM_KEYS = ("t212", "monzo")
 MIN_PASSPHRASE = 8

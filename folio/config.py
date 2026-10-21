@@ -23,7 +23,7 @@ APP_NAME = "Whiskers"
 #: separator in batch files, and the next name might not be one plain word.
 APP_FILE_NAME = "Whiskers"
 APP_SLUG = "whiskers"
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
 APP_TAGLINE = "Investment tracker"
 
 #: Where every copy looks for new versions: the latest GitHub release of the repository.
@@ -85,6 +85,8 @@ DEFAULTS = {
     # adds up exactly as 1.0 did.
     "show_mortgage": False,
     "show_retirement": False,
+    # 1.2: the Overview's News panel (the day's five biggest business stories).
+    "show_news": True,
     # The statements folder (in Documents unless chosen) and the monthly reminder to fill it.
     "statements_folder": "",
     "reminder_day": 1,

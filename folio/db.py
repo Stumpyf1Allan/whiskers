@@ -278,6 +278,12 @@ CREATE TABLE IF NOT EXISTS import_mappings(
 CREATE TABLE IF NOT EXISTS networth(
   d TEXT PRIMARY KEY, own REAL, owe REAL, net REAL, detail TEXT
 );
+
+-- 1.2: the Overview's News list. This device only: it is stale within hours, so it never
+-- travels to the phone's copy.
+CREATE TABLE IF NOT EXISTS news(
+  id INTEGER PRIMARY KEY CHECK (id = 1), fetched_at TEXT, data TEXT
+);
 """
 
 #: (table, column, definition) — applied on every start, idempotently.
