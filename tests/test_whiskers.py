@@ -1488,6 +1488,25 @@ def test_the_big_picture_hides_amounts_and_never_forecasts():
     assert "Chip stocks: amber since 1 Sep, still getting worse" in b["ai"]
 
 
+def test_the_big_picture_says_calm_once_and_drift_in_plain_words():
+    def light(key, title, group):
+        return {"key": key, "title": title, "group": group, "level": "green", "direction": "worsening"}
+    market = {"lights": [light("world_trend", "World shares", "market"),
+                         light("world_fall", "World shares: fall from high", "market"),
+                         light("vix", "Fear gauge", "market"), light("credit", "Credit stress", "market"),
+                         light("sahm", "Recession indicator", "economy"),
+                         light("ig", "Solid-company borrowing", "economy")],
+              "groups": {"market": {"label": "Calm"}, "economy": {"label": "Calm"}}}
+    pb = {"firing": 1, "of": 8, "tier": {"label": "Normal"}, "signals": []}
+    mk = narrative.big_picture(market, pb, {}, {"sleeves": []}, {"platforms": []})["markets"]
+    assert mk.startswith("Markets in general are calm: world shares are above")
+    assert "lights are green" not in mk and "Heading the wrong way" not in mk
+    assert "world shares have slipped, and fear and credit stress have crept up" in mk
+    assert mk.count("world shares have slipped") == 1
+    assert "US unemployment and borrowing costs for solid companies have crept up" in mk
+    assert mk.endswith("Your eight signals: 1 firing (normal).")
+
+
 
 # ============================================================================ the plan builder
 
