@@ -16,7 +16,9 @@ import pytest
 from folio import config, db, net, sync
 from folio.market import news
 
-NOW = dt.datetime(2026, 10, 21, 12, 0, tzinfo=dt.timezone.utc)
+# Today, not a fixed date: refresh() keeps only the last 24 hours by the real clock, so a
+# fixed date made these tests start failing the day after it.
+NOW = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
 
 
 def _stamp(hours_ago: float) -> str:

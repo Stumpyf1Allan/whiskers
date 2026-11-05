@@ -831,6 +831,16 @@ def test_the_spec_points_at_real_files_and_never_excludes_an_aliased_module():
         assert (ROOT / "folio" / "resources" / icon).exists(), icon
 
 
+def test_the_release_build_installs_and_bundles_pdf_reading():
+    # 1.2.0 and earlier shipped without pdfplumber: the spec only bundles what is
+    # installed, and nothing the release build installs asked for it.
+    reqs = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    assert re.search(r"^pdfplumber\b", reqs, re.M)
+    spec = (ROOT / "build" / "whiskers.spec").read_text(encoding="utf-8")
+    for mod in ("pdfplumber", "pdfminer", "pypdfium2"):
+        assert f'"{mod}"' in spec, mod
+
+
 def test_windows_scripts_have_windows_line_endings():
     for f in (ROOT / "build" / "build_windows.bat", ROOT / "Start Whiskers.bat",
               ROOT / "Try Whiskers 1.1 (test copy).bat"):
