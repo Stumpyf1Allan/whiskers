@@ -50,7 +50,10 @@ hiddenimports = ["sqlite3", "webbrowser", "json", "csv", "_cffi_backend", "cffi"
 # and Yahoo would start refusing it.
 try:
     from PyInstaller.utils.hooks import collect_all
-    for mod in ("curl_cffi", "cffi", "certifi"):
+    # pdfplumber reads PDF statements. pdfminer carries data files (its font maps) and
+    # pypdfium2 a compiled PDF library, which naming the import alone would leave behind.
+    for mod in ("curl_cffi", "cffi", "certifi",
+                "pdfplumber", "pdfminer", "pypdfium2", "pypdfium2_raw"):
         try:
             d, b, h = collect_all(mod)
             datas += d

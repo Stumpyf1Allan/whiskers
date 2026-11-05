@@ -28,6 +28,7 @@ is completely different: ask the bank for a CSV, or run it through OCR first.
 from __future__ import annotations
 
 import re
+import sys
 
 from .readers import Table, parse_amount, parse_date
 
@@ -58,6 +59,13 @@ def _open(path):
     try:
         import pdfplumber
     except ImportError as e:
+        if getattr(sys, "frozen", False):
+            # Installing pdfplumber on the computer can't help: the app has its own Python.
+            raise PdfUnavailable(
+                "This copy of Whiskers can't read PDF statements. Update Whiskers to the "
+                "latest version, or download a CSV or Excel statement from your platform "
+                "instead."
+            ) from e
         raise PdfUnavailable(
             "Reading a PDF statement needs the 'pdfplumber' package, which isn't "
             "installed. Install it with:  pip install pdfplumber\n"
