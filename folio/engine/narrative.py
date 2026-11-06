@@ -14,8 +14,7 @@ STATE = {"green": "normal", "amber": "raised", "red": "high", "none": "not avail
 CALM = {
     "market": "World shares are above their long-term trend and within 10% of their high, "
               "with fear and credit stress low.",
-    "economy": "No sign of a downturn building: the yield curve isn't inverted, US "
-               "unemployment isn't rising and financial strain is at or below average.",
+    "economy": "No sign of a downturn building.",
     "ai": "The AI trade's trend is intact, chip stocks and Nvidia are near their highs, and "
           "AI stocks are still keeping pace with the market.",
 }
@@ -56,7 +55,52 @@ def _heading(x: dict) -> str:
         x.get("direction"), "")
 
 
-def lights_story(lights: list[dict], group: str) -> str:
+#: A green light heading the wrong way, in words: who, whether they take "have", and what
+#: they did. Theme lights not listed are worded from their titles.
+WORSE = {
+    "world_trend": ("world shares", True, "slipped"),
+    "world_fall": ("world shares", True, "slipped"),
+    "vix": ("fear", False, "crept up"),
+    "credit": ("credit stress", False, "crept up"),
+    "curve": ("the yield curve", False, "flattened"),
+    "sahm": ("US unemployment", False, "crept up"),
+    "fsi": ("financial stress", False, "crept up"),
+    "ig": ("borrowing costs for solid companies", True, "crept up"),
+    "ndx_trend": ("the tech-heavy US market", False, "slipped"),
+    "sox_fall": ("chip stocks", True, "slipped"),
+    "nvda_fall": ("Nvidia", False, "slipped"),
+    "ai_lead": ("AI stocks", True, "lost ground to the market"),
+}
+
+
+def _worse(x: dict) -> tuple:
+    if x["key"] in WORSE:
+        return WORSE[x["key"]]
+    from . import themes
+    name = x["title"].removesuffix(": fall from high")
+    many = name.endswith("s") and not name.endswith("ss")
+    return themes.lower_first(name), many, "slipped" if name != x["title"] else "moved the wrong way"
+
+
+def _drifting(lights: list[dict]) -> str:
+    """Green lights heading the wrong way over the past month, as one clause:
+    "world shares have slipped and fear and credit stress have crept up"."""
+    said: dict[str, list] = {}
+    for x in lights:
+        if x.get("direction") == "worsening":
+            who, many, did = _worse(x)
+            subjects = said.setdefault(did, [])
+            if who not in [w for w, _ in subjects]:
+                subjects.append((who, many))
+    clauses = [f"{_join([w for w, _ in subs])} {'have' if len(subs) > 1 or subs[0][1] else 'has'} {did}"
+               for did, subs in said.items()]
+    if len(clauses) > 1 and any(" and " in c for c in clauses):
+        return ", ".join(clauses[:-1]) + ", and " + clauses[-1]
+    return _join(clauses)
+
+
+def lights_story(lights: list[dict], group: str, brief: bool = False) -> str:
+    """`brief` leaves out "All 4 lights are green", for when the reading already says calm."""
     known = [x for x in lights if x["level"] != "none"]
     if not known:
         return "No data yet for these lights."
@@ -66,10 +110,10 @@ def lights_story(lights: list[dict], group: str) -> str:
         if calm is None:
             from . import themes
             calm = (themes.LIBRARY.get(group) or {}).get("calm", "Prices are holding their trends.")
-        text = f"All {len(known)} lights are green. {calm}"
-        worse = [x["title"] for x in known if x.get("direction") == "worsening"]
-        if worse:
-            text += f" Heading the wrong way over the past month: {_join(worse)}."
+        text = calm if brief else f"All {len(known)} lights are green. {calm}"
+        drift = _drifting(known)
+        if drift:
+            text += f" Over the past month, {drift}, though still in the normal range."
         return text
     parts = [f"{x['title']}: {x['level']} since {_day(x.get('since'))}{_heading(x)}" for x in bad]
     good = len(known) - len(bad)
@@ -77,6 +121,16 @@ def lights_story(lights: list[dict], group: str) -> str:
     if good:
         text += f" The other {good} {'is' if good == 1 else 'are'} green."
     return text
+
+
+def _reading(name: str, verb: str, group: str, market: dict) -> str:
+    """"Markets in general are calm: world shares are…", or "The economy: watch. …"."""
+    from . import themes
+    label = (market.get("groups", {}).get(group) or {}).get("label") or "No data"
+    story = lights_story([x for x in market.get("lights", []) if x["group"] == group], group, brief=True)
+    if label == "Calm":
+        return f"{name} {verb} calm: {themes.lower_first(story)}"
+    return f"{name}: {label.lower()}. {story}"
 
 
 def watch(market: dict, playbook: dict | None) -> dict:
@@ -201,7 +255,7 @@ def big_picture(market: dict, pb: dict | None, exp: dict, alloc: dict, totals: d
     if main != "ai":
         title = w.get("main_title") or main
         theme = f"{title} reads {groups.get(main, {}).get('label', 'no data').lower()}. " + \
-            lights_story([x for x in lights if x["group"] == main], main)
+            lights_story([x for x in lights if x["group"] == main], main, brief=True)
         if pb:
             from . import themes
             fired = [r for r in pb["signals"] if r["group"] == main]
@@ -210,7 +264,7 @@ def big_picture(market: dict, pb: dict | None, exp: dict, alloc: dict, totals: d
         return _portfolio_paragraphs(theme, market, pb, texp or exp, alloc, totals, title,
                                      w.get("main_label") or title)
     ai = f"The AI trade reads {groups.get('ai', {}).get('label', 'no data').lower()}. " + \
-        lights_story([x for x in lights if x["group"] == "ai"], "ai")
+        lights_story([x for x in lights if x["group"] == "ai"], "ai", brief=True)
     if pb:
         rows = {r["key"]: r for r in pb["signals"]}
         bits = []
@@ -231,14 +285,11 @@ def big_picture(market: dict, pb: dict | None, exp: dict, alloc: dict, totals: d
 
 def _portfolio_paragraphs(theme: str, market: dict, pb: dict | None, exp: dict, alloc: dict,
                           totals: dict, title: str, short: str) -> dict:
-    lights = market.get("lights", [])
-    groups = market.get("groups", {})
-    mk = f"Markets in general read {groups.get('market', {}).get('label', 'no data').lower()}. " + \
-        lights_story([x for x in lights if x["group"] == "market"], "market") + " The economy: " + \
-        lights_story([x for x in lights if x["group"] == "economy"], "economy")
+    mk = _reading("Markets in general", "are", "market", market) + " " + \
+        _reading("The economy", "is", "economy", market)
     if pb:
         words = {8: "eight"}.get(pb["of"], str(pb["of"]))
-        mk += f" Your {words} signals: {pb['firing']} of {pb['of']} firing ({pb['tier']['label'].lower()})."
+        mk += f" Your {words} signals: {pb['firing']} firing ({pb['tier']['label'].lower()})."
     parts = []
     pct_key, val_key = ("ai_pct", "ai_value") if "ai_pct" in exp else ("pct", "value")
     if exp.get(pct_key) is not None:
