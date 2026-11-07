@@ -718,3 +718,107 @@ class TestAFailedCheckSaysWhatFailed:
         from folio import updates
         assert updates.RETRY_INTERVAL < updates.CHECK_INTERVAL, \
             "a laptop that was offline for five minutes should not wait a day"
+
+
+# ===========================================================================
+# Update now (Windows, one .exe): replace this exe and restart
+# ===========================================================================
+
+class TestUpdateNow:
+    @pytest.fixture()
+    def win(self, host, monkeypatch, tmp_path):
+        """A frozen Windows copy running from tmp/app/Whiskers.exe, with the helper
+        launch and the exit both captured instead of happening."""
+        from folio import selfupdate
+        app = tmp_path / "app"
+        app.mkdir()
+        exe = app / "Whiskers.exe"
+        exe.write_bytes(b"the old version")
+        monkeypatch.setattr(updates, "platform_key", lambda: "windows")
+        monkeypatch.setattr(sys, "executable", str(exe))
+        launched, exits = [], threading.Event()
+        monkeypatch.setattr(selfupdate.subprocess, "Popen",
+                            lambda *a, **k: launched.append((a, k)))
+        monkeypatch.setattr(selfupdate, "EXIT_DELAY", 0.0)
+        monkeypatch.setattr(selfupdate, "_exit_now", exits.set)
+        host.publish()
+
+        class W:
+            pass
+        w = W()
+        w.exe, w.launched, w.exits, w.mod = exe, launched, exits, selfupdate
+        return w
+
+    def test_it_replaces_the_exe_beside_itself_and_restarts(self, win):
+        st = win.mod._install()
+        assert st["status"] == "restarting", st.get("last_error")
+        new = win.exe.with_name("Whiskers.exe.new")
+        assert new.read_bytes() == PAYLOAD, "the checked copy waits beside the old exe"
+        assert win.exe.read_bytes() == b"the old version", "the running exe is never touched"
+        (args, kw), = win.launched
+        assert args[0][:2] == ["cmd.exe", "/c"]
+        assert kw["env"]["WHISKERS_NEW"] == str(new)
+        assert kw["env"]["WHISKERS_DST"] == str(win.exe.resolve())
+        assert pathlib.Path(args[0][2]).read_text(encoding="ascii") \
+            .replace("\r\n", "\n") == win.mod.HELPER
+        assert win.exits.wait(2), "it never closed itself so the helper could replace it"
+
+    def test_a_tampered_download_never_gets_as_far_as_the_exe(self, win, host):
+        host.publish(downloads=host.entry(sha256="0" * 64))
+        st = win.mod._install()
+        assert st["status"] != "restarting"
+        assert not win.exe.with_name("Whiskers.exe.new").exists()
+        assert not win.launched
+
+    def test_a_folder_it_cannot_write_to_stops_before_anything_closes(self, win, monkeypatch):
+        def refuse(*a, **k):
+            raise PermissionError(13, "Permission denied")
+        monkeypatch.setattr(win.mod.shutil, "copyfile", refuse)
+        st = win.mod._install()
+        assert st["status"] == "ready"
+        assert "Show the new version" in st["last_error"]
+        assert not win.launched
+        assert not win.exits.is_set()
+
+    def test_running_from_the_updates_folder_is_refused_with_a_reason(self, win, monkeypatch):
+        updates.check(force=True)
+        updates.download()
+        inside = pathlib.Path(updates.state()["file"])
+        monkeypatch.setattr(sys, "executable", str(inside))
+        st = win.mod._install()
+        assert st["status"] == "ready"
+        assert "updates folder" in st["last_error"]
+        assert not win.launched
+
+    def test_the_helper_only_uses_values_the_app_passes_in_the_environment(self, win):
+        import re
+        names = set(re.findall(r"%([A-Za-z_]+)%", win.mod.HELPER))
+        assert names == {"WHISKERS_NEW", "WHISKERS_DST", "WHISKERS_LOG", "tries"} | {"date", "time"}
+        win.mod.HELPER.encode("ascii")
+
+    def test_the_helper_gets_a_hidden_console_not_a_detached_one(self):
+        """DETACHED_PROCESS would make Windows open a visible console for ping and move."""
+        src = (pathlib.Path(__file__).parents[1] / "folio" / "selfupdate.py").read_text(encoding="utf-8")
+        flags = src.split("flags = (", 1)[1].split("subprocess.Popen(", 1)[0]
+        assert "CREATE_NO_WINDOW" in flags and "DETACHED_PROCESS" not in flags
+
+    def test_other_platforms_keep_show_the_new_version(self, host, monkeypatch):
+        from folio import selfupdate
+        from folio.web import server
+        monkeypatch.setattr(updates, "platform_key", lambda: "macos")
+        assert updates.state()["can_install"] is False
+        with pytest.raises(server.ApiError):
+            server.api_update_install(None, {}, {}, None)
+        assert selfupdate.target() is None
+
+    def test_a_windows_exe_is_offered_the_button(self, host, monkeypatch):
+        monkeypatch.setattr(updates, "platform_key", lambda: "windows")
+        assert updates.state()["can_install"] is True
+
+
+def test_the_banner_shows_the_download_as_it_goes():
+    js = (pathlib.Path(__file__).parents[1] / "folio" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    banner = js.split("async function checkUpdateBanner()", 1)[1].split("ACTS['upd-dismiss']", 1)[0]
+    assert "Downloading Whiskers" in banner and "u.progress" in banner
+    assert "setTimeout(checkUpdateBanner, 1000)" in banner, "it should look again every second"
+    assert "data-act=\"upd-install\"" in banner

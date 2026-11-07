@@ -365,19 +365,48 @@ async function pollRefresh() {
 // ---------------------------------------------------------------------------- updates
 
 async function checkUpdateBanner() {
+  clearTimeout(S.updTimer);
   let u;
   try { u = await api('/api/update'); } catch { return; }
   const b = $('#update-banner');
-  if (!u.show_banner) { b.hidden = true; return; }
+  if (!u.show_banner) { b.hidden = true; S.updating = null; return; }
+  // While a download or an update is under way, show how far it has got and look again
+  // every second. S.updating is 'download' or 'install' once a button has been pressed.
+  const moving = u.status === 'downloading' || u.status === 'restarting';
+  if (S.updating && !moving) {
+    if (u.last_error) { toast(u.last_error, true); S.updating = null; }
+    else if (u.status === 'ready' && S.updating === 'download') S.updating = null;
+    else if (++S.updPolls > 120) S.updating = null;
+  }
+  if (moving || S.updating) {
+    const pct = Math.round((u.progress || 0) * 100);
+    b.innerHTML = `<span><b>${u.status === 'restarting' ? 'Restarting Whiskers…'
+      : u.status === 'downloading' ? `Downloading Whiskers ${esc(u.latest)}… ${pct}%`
+      : 'Getting the update ready…'}</b></span>` +
+      (u.status === 'downloading' ? `<progress max="100" value="${pct}"></progress>` : '');
+    b.hidden = false;
+    S.updTimer = setTimeout(checkUpdateBanner, 1000);
+    return;
+  }
   const ready = u.status === 'ready';
-  b.innerHTML = `<span><b>Whiskers ${esc(u.latest)} is available.</b> ${esc(u.notes || '')}</span>` +
-    (ready ? `<button class="btn small primary" data-act="upd-reveal">${onAndroid() ? 'Install it' : 'Show the new version'}</button>`
-           : `<button class="btn small" data-act="upd-download">Download it</button>`) +
+  // Windows one-.exe copies: one button does the lot (download, check, replace, restart).
+  const act = u.can_install
+    ? `<button class="btn small primary" data-act="upd-install">Update now</button>` +
+      (ready ? `<button class="btn small ghost" data-act="upd-reveal">Show the new version</button>` : '')
+    : ready ? `<button class="btn small primary" data-act="upd-reveal">${onAndroid() ? 'Install it' : 'Show the new version'}</button>`
+            : `<button class="btn small" data-act="upd-download">Download it</button>`;
+  b.innerHTML = `<span><b>Whiskers ${esc(u.latest)} is available.</b> ${esc(u.notes || '')}</span>` + act +
     `<button class="btn small ghost" data-act="upd-dismiss">Not now</button>`;
   b.hidden = false;
   wire(b);
 }
-ACTS['upd-download'] = async btn => { await busy(btn, () => api('/api/update/download', { method: 'POST' })); setTimeout(checkUpdateBanner, 4000); };
+async function startUpdate(kind, url) {
+  S.updating = kind; S.updPolls = 0;
+  try { await api(url, { method: 'POST' }); } catch (e) { S.updating = null; toast(e.message, true); }
+  checkUpdateBanner();
+}
+ACTS['upd-install'] = () => startUpdate('install', '/api/update/install');
+ACTS['upd-download'] = () => startUpdate('download', '/api/update/download');
 ACTS['upd-reveal'] = async () => {
   try {
     const r = await api('/api/update/reveal', { method: 'POST' });

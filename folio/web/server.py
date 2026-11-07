@@ -22,7 +22,7 @@ import unicodedata
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .. import android, config, db, inbox, net, security, sync, updates
+from .. import android, config, db, inbox, net, security, selfupdate, sync, updates
 from ..brokers import freetrade, monzo, symbols, trading212
 from ..engine import (allocation, export, isa, mathx, narrative, plan, playbook, portfolio, rules, sample,
                       sections, signals, stress, themes)
@@ -1015,6 +1015,16 @@ def api_update_download(req, m, q, body):
     if not updates.state().get("download"):
         raise ApiError("There's nothing to download — check for an update first.")
     updates.start_download()
+    return updates.state()
+
+
+@route("POST", "/api/update/install")
+def api_update_install(req, m, q, body):
+    """Windows only: download if needed, verify, replace this exe, restart. The paths
+    are the app's own; nothing from the page is used."""
+    if not selfupdate.can_install():
+        raise ApiError("This copy can't update itself. Use “Show the new version”.")
+    selfupdate.start()
     return updates.state()
 
 
