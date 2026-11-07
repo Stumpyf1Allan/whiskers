@@ -23,7 +23,7 @@ APP_NAME = "Whiskers"
 #: separator in batch files, and the next name might not be one plain word.
 APP_FILE_NAME = "Whiskers"
 APP_SLUG = "whiskers"
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 APP_TAGLINE = "Investment tracker"
 
 #: Where every copy looks for new versions: the latest GitHub release of the repository.
