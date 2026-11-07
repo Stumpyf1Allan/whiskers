@@ -1421,6 +1421,19 @@ def test_credit_cards_are_taken_off_cash_and_never_counted_as_protected(server):
     assert not [w for w in rules.evaluate(pos, tot, allocation.view(pos, tot)) if w["id"] == f"fscs:{amex}"]
 
 
+
+def test_a_cash_account_is_instant_access_unless_marked_as_savings(server):
+    ok = {"Content-Type": "application/json"}
+    _req(server, "/api/platforms", "POST", ok, json.dumps({"name": "HSBC", "provider": "bank", "cash": 500}).encode())
+    _, body, _ = _req(server, "/api/platforms", "POST", ok,
+                      json.dumps({"name": "Spring", "provider": "bank", "cash": 9000, "instant": False}).encode())
+    spring = json.loads(body)["id"]
+    plats = {p["name"]: p for p in portfolio.totals()["platforms"]}
+    assert plats["HSBC"]["instant"] is True and plats["Spring"]["instant"] is False
+    _req(server, f"/api/platforms/{spring}", "PATCH", ok, json.dumps({"instant": True}).encode())
+    assert next(p for p in portfolio.totals()["platforms"] if p["name"] == "Spring")["instant"] is True
+    assert portfolio.totals()["outside_cash"] == 9500, "the split changes nothing else"
+
 def test_monzo_link_needs_a_state_this_copy_handed_out(server, monkeypatch):
     pid = add_platform("Monzo", "bank")
     with pytest.raises(monzo.MonzoError):
