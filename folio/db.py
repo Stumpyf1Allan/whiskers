@@ -308,6 +308,8 @@ ADDED_COLUMNS: list[tuple[str, str, str]] = [
     # 1.1: a parachute step names the sleeve it cuts and the sleeve the money goes to
     ("rules", "sleeve", "TEXT"),
     ("rules", "into_sleeve", "TEXT"),          # "into" is a word SQL keeps for itself
+    # 1.2.2: a cash account you can spend today (1), or savings that take a day or two (0)
+    ("platforms", "instant", "INTEGER DEFAULT 1"),  # NULL counts as instant access
 ]
 
 _init_lock = threading.Lock()

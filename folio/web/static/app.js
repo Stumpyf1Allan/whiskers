@@ -2124,6 +2124,7 @@ function cashPanel(d) {
     const codi = x.scheme === 'CoDI' && known(x.cash_native) ? ` CoDI covers R100,000 per bank: ${x.cash_native > 100000 ? `<span class="warnline">R${Math.round(x.cash_native - 100000).toLocaleString('en-GB')} over</span>` : 'all of it covered'}.` : '';
     return `<tr><td><b>${esc(x.name)}</b>${foreign ? ` <span class="chip">${esc(x.currency)}</span>` : ''}<div class="tiny muted">${x.cash_as_of ? `${auto ? 'From Monzo, ' : 'Updated '}${ago(x.cash_as_of)}` : 'No balance yet'}${foreign ? (x.fx_missing ? ' <span class="warnline">No exchange rate yet: press Refresh. Left out of totals until then.</span>' : `, ${money(x.cash)} at today\u2019s rate.`) : ''}${codi}${x.last_error ? ` <span class="warnline">${esc(x.last_error)}</span>` : ''}</div></td>
       <td class="r">${auto ? `<span class="fig">${money(x.cash)}</span>` : `<input type="number" step="0.01" id="bank-${x.id}" value="${known(native) ? native : ''}" style="width:130px" aria-label="Balance for ${esc(x.name)} in ${esc(x.currency || 'GBP')}">`}</td>
+      <td><input type="checkbox" data-act="bank-instant" data-id="${x.id}" ${x.instant ? 'checked' : ''} aria-label="${esc(x.name)} is instant access"></td>
       <td><input type="checkbox" data-act="bank-plan" data-id="${x.id}" ${x.in_plan ? 'checked' : ''} aria-label="Count ${esc(x.name)} in my plan"></td>
       <td class="r nowrap">${auto ? `<button class="btn small ghost" data-act="monzo-forget" data-id="${x.id}">Disconnect</button>`
         : `${monzoish ? `<button class="btn small" data-act="monzo-connect" data-id="${x.id}">Connect automatically</button> ` : ''}<button class="btn small" data-act="bank-save" data-id="${x.id}">Save</button>`}
@@ -2134,12 +2135,18 @@ function cashPanel(d) {
       <td class="r nowrap"><button class="btn small" data-act="card-save" data-id="${x.id}">Save</button>
         <button class="btn small ghost danger" data-act="bank-del" data-id="${x.id}" data-name="${esc(x.name)}">Remove</button></td></tr>`;
   const net = d.platforms.filter(p => p.kind === 'bank' || p.kind === 'card').reduce((a, p) => a + (p.cash || 0), 0);
+  const sum = list => list.reduce((a, p) => a + (p.cash || 0), 0);
+  const saving = banks.filter(p => !p.instant);
+  const fig = (label, v) => `<p class="small" style="margin-top:4px">${label}: <b class="fig">${money(v)}</b></p>`;
+  const totalsLine = !saving.length ? fig('Cash less cards', net)
+    : `<div style="margin-top:10px">${fig('Instant access less cards', sum(banks.filter(p => p.instant)) + sum(cards))}
+      ${fig('Savings, a day or two to reach', sum(saving))}${fig('All cash less cards', net)}</div>`;
   return `<section class="panel"><div class="spread"><h2>Cash and cards</h2>
       <div class="row"><button class="btn" data-act="bank-add">Add a cash account</button><button class="btn" data-act="card-add">Add a credit card</button></div></div>
-    <p class="lede">Bank and savings accounts such as HSBC or Spring, and credit cards such as Amex or Barclaycard. Type balances in when they change; Monzo can update itself. They sit beside your portfolio, not inside it: cards are taken off your cash, and a cash account counts in your Cash sleeve only if you tick \u201cPart of my plan\u201d.</p>
-    ${banks.length ? `<div class="table-wrap"><table><thead><tr><th>Cash account</th><th class="r">Balance, in its own currency</th><th>Part of my plan</th><th></th></tr></thead><tbody>${banks.map(bankRow).join('')}</tbody></table></div>` : ''}
+    <p class="lede">Bank and savings accounts such as HSBC or Spring, and credit cards such as Amex or Barclaycard. Type balances in when they change; Monzo can update itself. They sit beside your portfolio, not inside it: cards are taken off your cash, and a cash account counts in your Cash sleeve only if you tick \u201cPart of my plan\u201d. Untick \u201cInstant access\u201d for savings that take a day or two to reach.</p>
+    ${banks.length ? `<div class="table-wrap"><table><thead><tr><th>Cash account</th><th class="r">Balance, in its own currency</th><th>Instant access</th><th>Part of my plan</th><th></th></tr></thead><tbody>${banks.map(bankRow).join('')}</tbody></table></div>` : ''}
     ${cards.length ? `<div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Credit card</th><th class="r">Owed (\u00a3)</th><th></th></tr></thead><tbody>${cards.map(cardRow).join('')}</tbody></table></div>` : ''}
-    ${banks.length || cards.length ? `<p class="small" style="margin-top:10px">Cash less cards: <b class="fig">${money(net)}</b></p>` : '<p class="muted">None yet.</p>'}
+    ${banks.length || cards.length ? totalsLine : '<p class="muted">None yet.</p>'}
     <p class="note" style="margin-top:8px">The FSCS protects bank deposits up to \u00a3120,000 per person per banking licence. Brands that share a licence share one limit (Spring is part of Paragon Bank, for one). In South Africa, CoDI covers R100,000 per person per bank. Money in another currency is converted at each day\u2019s rate wherever pounds are added up.</p>
   </section>`;
 }
@@ -2151,13 +2158,14 @@ ACTS['bank-add'] = () => openModal({
     <div class="row wrap" style="align-items:flex-end">
       <label class="field">Currency<select id="bank-ccy"><option value="GBP">Pounds (GBP)</option><option value="ZAR">Rand (ZAR)</option><option value="EUR">Euros (EUR)</option><option value="USD">US dollars (USD)</option></select></label>
       <label class="field grow">Balance, in that currency<input type="number" step="0.01" id="bank-bal"></label></div>
+    <label class="row small"><input type="checkbox" id="bank-instant" checked> Instant access: I can spend it today (untick for savings that take a day or two)</label>
     <label class="row small"><input type="checkbox" id="bank-inplan"> Part of my plan: count this balance in my Cash sleeve</label></div>`,
   foot: '<button class="btn primary" data-act="bank-create">Add the account</button>',
 });
 ACTS['bank-create'] = async () => {
   const name = $('#bank-name').value.trim();
   if (!name) { toast('Give the account a name.', true); return; }
-  await api('/api/platforms', { method: 'POST', body: { name, provider: 'bank', cash: $('#bank-bal').value, in_plan: $('#bank-inplan').checked, currency: $('#bank-ccy').value, country: $('#bank-ccy').value === 'ZAR' ? 'ZA' : 'GB' } });
+  await api('/api/platforms', { method: 'POST', body: { name, provider: 'bank', cash: $('#bank-bal').value, in_plan: $('#bank-inplan').checked, instant: $('#bank-instant').checked, currency: $('#bank-ccy').value, country: $('#bank-ccy').value === 'ZAR' ? 'ZA' : 'GB' } });
   pollRefresh();
   closeModal();
   toast(`${name} added.`);
@@ -2186,6 +2194,10 @@ ACTS['bank-save'] = async b => {
 ACTS['card-save'] = async b => {
   await api(`/api/platforms/${b.dataset.id}`, { method: 'PATCH', body: { owed: $(`#card-${b.dataset.id}`).value } });
   toast('Saved.');
+  render();
+};
+ACTS['bank-instant'] = async b => {
+  await api(`/api/platforms/${b.dataset.id}`, { method: 'PATCH', body: { instant: b.checked } });
   render();
 };
 ACTS['bank-plan'] = async b => {

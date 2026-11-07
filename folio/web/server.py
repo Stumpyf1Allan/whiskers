@@ -637,6 +637,7 @@ def api_add_platform(req, m, q, body):
                                      else provider == "trading212") else 0)
     # A bank account's cash sits beside the portfolio unless asked to count in the plan.
     in_plan = 1 if (b.get("in_plan", not bank) and provider != "card") else 0
+    instant = 0 if b.get("instant") is False else 1
     cash = _float(b.get("cash"), "The balance", -1_000_000, 100_000_000, allow_none=True)
     if provider == "card":
         owed = _float(b.get("owed"), "What you owe", 0, 10_000_000, allow_none=True)
@@ -647,13 +648,14 @@ def api_add_platform(req, m, q, body):
     country = str(b.get("country") or "").upper()[:2] or None
     with db.tx() as c:
         cur = c.execute("INSERT INTO platforms(name,provider,wrapper,flexible,limit_gbp,in_plan,cash,"
-                        "cash_as_of,cash_source,currency,country,institution,fee_year,sort) "
-                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(sort),0)+1 FROM platforms))",
+                        "cash_as_of,cash_source,currency,country,institution,fee_year,instant,sort) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(sort),0)+1 FROM platforms))",
                         (name, provider, wrapper, flexible,
                          _float(b.get("limit"), "The limit", 0, allow_none=True), in_plan, cash,
                          db.now() if cash is not None else None, "manual" if cash is not None else None,
                          ccy, country, (str(b.get("institution") or "")[:80] or None),
-                         _float(b.get("fee_year"), "The platform fee", 0, 100000, allow_none=True)))
+                         _float(b.get("fee_year"), "The platform fee", 0, 100000, allow_none=True),
+                         instant))
     return {"ok": True, "id": cur.lastrowid}
 
 
@@ -671,6 +673,8 @@ def api_patch_platform(req, m, q, body):
         sets.append("flexible=?"), vals.append(1 if b["flexible"] else 0)
     if "in_plan" in b:
         sets.append("in_plan=?"), vals.append(1 if b["in_plan"] else 0)
+    if "instant" in b:
+        sets.append("instant=?"), vals.append(1 if b["instant"] else 0)
     if "wrapper" in b and b["wrapper"] in WRAPPERS:
         sets.append("wrapper=?"), vals.append(b["wrapper"])
     if "limit" in b:

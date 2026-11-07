@@ -150,7 +150,7 @@ def platforms_summary(pos: list[dict] | None = None) -> list[dict]:
             "total": total, "unpriced": unknown,
             "limit": limit, "limit_native": limit_native, "scheme": scheme,
             "kind": {"bank": "bank", "card": "card"}.get(p["provider"], "platform"),
-            "in_plan": bool(p["in_plan"]),
+            "in_plan": bool(p["in_plan"]), "instant": p.get("instant") != 0,
             "reported_total": p["reported_total"], "reported_at": p["reported_at"],
             "last_sync": p["last_sync"], "last_error": p["last_error"],
         })
