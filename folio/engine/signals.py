@@ -304,11 +304,17 @@ def stopped_updating(ref, pts: list[tuple[str, float]]) -> bool:
     return (last_ok - last).days > allowed
 
 
-def reading(defn: dict) -> dict:
-    pts = _series(defn["ref"])
+def reading(defn: dict, pts: list[tuple[str, float]] | None = None) -> dict:
+    """One light. `pts` is given for a series Whiskers makes itself (your own holdings)."""
+    own = pts is not None
+    if not own:
+        pts = _series(defn["ref"])
     base = {"key": defn["key"], "title": defn["title"], "sub": defn["sub"], "group": defn["group"],
             "explain": defn.get("explain") or EXPLAIN.get(defn["key"], ""), "level": "none", "words": "",
             "as_of": None, "spark": [], "history": []}
+    if not pts and own:
+        base["words"] = "Not enough price history for your holdings yet."
+        return base
     if not pts:
         refs = defn["ref"] if isinstance(defn["ref"], tuple) else (defn["ref"],)
         if refs and refs[0] in ("SEC", "BASKET"):
@@ -318,7 +324,7 @@ def reading(defn: dict) -> dict:
         errs = [(store.meta(k) or {}).get("last_error") for k in keys]
         base["words"] = next((e for e in errs if e), "Not fetched yet.")
         return base
-    if stopped_updating(defn["ref"], pts):
+    if not own and stopped_updating(defn["ref"], pts):
         base["as_of"] = pts[-1][0]
         base["words"] = (f"Its source hasn't published a new figure since {_day(pts[-1][0])}, so this "
                          "light is left out rather than shown as though it were current.")

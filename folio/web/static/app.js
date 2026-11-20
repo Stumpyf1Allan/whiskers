@@ -327,6 +327,7 @@ function toggleHide() {
 
 async function startRefresh(force = false) {
   loadNews(true);
+  setTimeout(() => loadBriefing(false), 20000);
   try {
     await api('/api/refresh', { method: 'POST', body: { force } });
     pollRefresh();
@@ -418,7 +419,7 @@ async function vOverview(el) {
         <div class="alerts" style="margin-top:8px">${warn.length ? warn.map(alertRow).join('') :
           '<p class="none-state">Nothing needs a look. Every sleeve is inside its band and no rule is tripped.</p>'}</div>
       </section>
-      <div class="stack">${miniMonitor(d.market, d.exposure, d.playbook, d.watch_exposure)}${bigPicture(d.big_picture)}${newsPanel()}</div>
+      <div class="stack">${miniMonitor(d.market, d.exposure, d.playbook, d.watch_exposure, d.warnings, d.lenses)}${bigPicture(d.big_picture)}${newsPanel()}</div>
     </div>
 
     <section class="panel">
@@ -518,37 +519,155 @@ function historyChart(d) {
 // The Summary's monitor is the main thing watched only (the AI trade, unless the plan
 // review chose something else); everything else is in the big picture underneath, and in
 // full on the Market watch screen.
-function miniMonitor(m, exp, pb, wexp) {
+function miniMonitor(m, exp, pb, wexp, warns, lenses) {
   const w = m.watch || { main: 'ai', main_title: 'The AI trade', main_label: 'AI' };
   const main = w.main || 'ai';
   const g = (m.groups || {})[main] || { label: 'No data', score: 0 };
-  const dial = { regime: { Calm: 'calm', Watch: 'watch', Turning: 'turning' }[g.label] || 'none', gauge: g.score || 0, label: g.label };
-  const lights = m.lights.filter(x => x.group === main).map(x => `<div class="row small" style="gap:8px"><span class="lvl ${x.level}" style="background:${monColour(x.level)}"></span><span>${esc(x.title)}</span></div>`).join('');
   const isAI = main === 'ai';
   const e = isAI ? { pct: exp.ai_pct, unknown: exp.unknown } : (wexp || {});
-  const what = isAI ? 'AI' : lowerFirst(w.main_label || w.main_title || main);
-  const sig = !pb ? '' : isAI ? ` Your AI signals: ${pb.ai_firing} of 3 firing.`
-    : pb.main_of ? ` Your ${esc(what)} signals: ${pb.main_firing} of ${pb.main_of} firing.` : '';
-  return `<section class="monitor" style="cursor:pointer" data-go="ai">
-    <div class="spread"><h2>${isAI ? 'AI watch' : esc(w.main_title || main)}</h2><span class="muted small">${isAI ? 'The AI trade only' : 'Your main watch'}</span></div>
-    <div class="row" style="margin:12px 0 4px;gap:18px;align-items:center">
-      <div style="width:150px;color:var(--mon-ink)">${Charts.gauge(needle(dial), { zones: GAUGE_ZONES, size: 220, label: dial.label })}</div>
-      <div><div class="regime-word ${dial.regime}">${esc(dial.label)}</div>
-      <p class="small" style="margin-top:6px;color:var(--mon-ink)">${known(e.pct) ? `${pct(e.pct, { dp: 0 })} of your money rides on ${esc(what)}` : `Exposure to ${esc(what)} not worked out yet`}${e.unknown ? `, ${plural(e.unknown, 'holding')} not rated` : ''}.${sig}</p></div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px">${lights || '<span class="small muted">No readings yet.</span>'}</div>
+  const mine = m.lights.filter(x => x.group === main);
+  S.lensWarns = warns || [];
+  const v = { key: main, title: isAI ? 'AI watch' : (w.main_title || main), story: isAI ? 'The AI trade' : (w.main_title || main), label: g.label, score: g.score || 0,
+    lights: mine, signals: (pb && pb.main_signals) || [], share: e.pct, unknown: e.unknown,
+    what: isAI ? 'AI' : lowerFirst(w.main_label || w.main_title || main), turn_at: isAI ? 4 : mine.length };
+  S.lensMain = v;
+  const chips = lenses || [];
+  S.lensChoices = chips;
+  S.lens = main;
+  return `<section class="monitor" id="lens-card" style="cursor:pointer" data-go="ai">
+    <div id="lens-chips" class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px">${lensChips(chips, main)}</div>
+    <div id="lens-body">${lensBody(v)}</div>
   </section>`;
 }
 
+function lensChips(chips, active) {
+  return chips.map(c => `<button class="btn small${c.key === active ? ' primary' : ''}" data-act="lens" data-lens="${esc(c.key)}" title="${c.pct ? `${pct(c.pct, { dp: 0 })} of your money, looking through funds` : ''}">${esc(c.label)}</button>`).join('');
+}
+
+// One lens: the dial, why it reads as it does, its lights, and any signals of your own for it.
+function lensBody(v) {
+  const dial = { regime: { Calm: 'calm', Watch: 'watch', Turning: 'turning' }[v.label] || 'none', gauge: v.score || 0, label: v.label };
+  const mine = v.lights || [];
+  const lights = mine.map(x => `<div class="row small" style="gap:8px" title="${esc(x.words || '')}"><span class="lvl ${x.level}" style="background:${monColour(x.level)}"></span><span>${esc(x.title)}</span></div>`).join('');
+  const what = v.what || lowerFirst(v.title);
+  const reds = mine.filter(x => x.level === 'red').length, ambers = mine.filter(x => x.level === 'amber').length;
+  const counts = [reds ? `${reds} red` : '', ambers ? `${ambers} amber` : ''].filter(Boolean).join(' and ');
+  const why = !mine.length ? '' : v.label === 'Turning' ? `${counts} out of ${mine.length}: past halfway, so it reads Turning.`
+    : v.label === 'Watch' ? `${counts} out of ${mine.length}: some warnings, but under halfway.`
+    : v.label === 'Calm' ? `All ${mine.length} lights green.` : '';
+  const sigs = v.signals || [];
+  const fired = sigs.filter(r => r.firing).length;
+  const opWord = { '>': 'above', '>=': 'at least', '<': 'below', '<=': 'at most' };
+  const num = (x, u) => x === null || x === undefined ? 'not entered' : u === 'of 4' ? `${Math.round(x)} of 4` : `${(+x).toFixed(Math.abs(x) < 100 ? 1 : 0).replace(/\.0$/, '')}${u === '%' ? '%' : ''}`;
+  const sigRows = sigs.map(r => `<div class="row small" style="gap:8px;align-items:baseline"><span class="lvl" style="background:${monColour(r.firing ? 'red' : r.firing === false ? 'green' : 'none')}"></span><span style="flex:1">${esc(r.title)}: <b>${num(r.value, r.unit)}</b></span><span class="muted tiny">fires ${opWord[r.op] || r.op} ${num(r.threshold, r.unit)}</span></div>`).join('');
+  const manual = sigs.filter(r => r.kind === 'manual');
+  const upd = manual.map(r => r.updated).filter(Boolean).sort().pop();
+  const stale = manual.some(r => r.stale);
+  const priceBad = v.label === 'Turning' || v.label === 'Watch';
+  const verdict = !sigs.length ? '' : priceBad && !fired ? 'Prices have weakened, but your own signals haven’t fired.'
+    : priceBad && fired ? 'Prices and your own signals are both warning.'
+    : fired ? 'Prices look fine, but some of your own signals are firing.' : 'Prices and your own signals are both fine.';
+  const share = v.key === 'portfolio' ? 'Your own holdings, as they stand today, priced back over time.'
+    : v.key === 'market' ? 'World shares, fear, credit stress and how broad the rally is.'
+    : known(v.share) ? `${pct(v.share, { dp: 0 })} of your money rides on ${esc(what)}${v.unknown ? `, ${plural(v.unknown, 'holding')} not rated` : ''}.`
+    : `Exposure to ${esc(what)} not worked out yet.`;
+  const isMainAI = v.key === 'ai';
+  const step = isMainAI ? (S.lensWarns || []).find(x => x.kind === 'step' && x.go === 'ai' && x.level === 'red') : null;
+  return `<div class="spread"><h2>${esc(v.title)}</h2><span class="muted small">${isMainAI ? 'The AI trade only' : v.key === 'portfolio' ? 'Your own holdings' : v.key === 'market' ? 'Markets in general' : 'One sector'}</span></div>
+    <div class="row" style="margin:12px 0 4px;gap:18px;align-items:center">
+      <div style="width:150px;color:var(--mon-ink)">${Charts.gauge(needle(dial), { zones: GAUGE_ZONES, size: 220, label: dial.label })}</div>
+      <div><div class="regime-word ${dial.regime}">${esc(dial.label)}</div>
+      <p class="small" style="margin-top:6px;color:var(--mon-ink)">${share}</p></div>
+    </div>
+    ${verdict ? `<p class="small" style="margin:6px 0 0;color:var(--mon-ink)"><b>${verdict}</b></p>` : ''}
+    <h3 class="small" style="margin:14px 0 2px">${v.key === 'portfolio' ? 'Lights' : 'Market lights'} <span class="muted" style="font-weight:normal">· ${v.key === 'portfolio' ? 'your holdings and sleeves' : 'prices'}, updated on every refresh</span></h3>
+    ${why ? `<p class="tiny muted" style="margin:0 0 6px">${why}</p>` : ''}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px">${lights || '<span class="small muted">No readings yet.</span>'}</div>
+    ${sigs.length ? `<h3 class="small" style="margin:14px 0 2px">Your ${esc(isMainAI ? 'AI' : v.key === 'market' ? 'market' : what)} signals: ${fired} of ${sigs.length} firing <span class="muted" style="font-weight:normal">· ${manual.length ? 'business numbers you enter by hand' : 'from your playbook'}</span></h3>
+    ${manual.length ? `<p class="tiny ${stale ? '' : 'muted'}" style="margin:0 0 6px${stale ? ';color:var(--mon-amber)' : ''}">${upd ? `Last updated ${fmtDate(upd)}` : 'Not entered yet'}${stale ? '. Due an update after the latest results.' : '.'}</p>` : ''}
+    <div style="display:grid;gap:5px">${sigRows}</div>` : ''}
+    ${step ? `<p class="small" style="margin:12px 0 0;color:${monColour('red')}"><b>Parachute:</b> ${esc(step.title)}.</p>` : ''}`;
+}
+
+ACTS.lens = async (b, e) => {
+  if (e) e.stopPropagation();
+  const key = b.dataset.lens;
+  S.lens = key;
+  try { localStorage.setItem('whiskers.lens', key); } catch {}
+  $$('#lens-chips [data-act="lens"]').forEach(x => x.classList.toggle('primary', x.dataset.lens === key));
+  const card = $('#lens-card');
+  if (card) card.dataset.go = key === 'portfolio' ? 'allocation' : 'ai';
+  let v;
+  if (S.lensMain && key === S.lensMain.key) v = S.lensMain;
+  else {
+    try { v = await api('/api/lens?key=' + encodeURIComponent(key)); } catch (err) { toast(err.message, true); return; }
+    if (S.lens !== key) return;                  // another button was pressed meanwhile
+    v.what = { market: 'the market', portfolio: 'your portfolio' }[key] || lowerFirst(v.title);
+  }
+  const body = $('#lens-body');
+  if (body) body.innerHTML = lensBody(v);
+  S.lensTitle = key === (S.lensMain || {}).key ? S.lensMain.story : v.title;
+  const bp = $('#bigpic-body');
+  if (bp) bp.innerHTML = bigPictureInner(key === (S.lensMain || {}).key ? S.mainPicture : v.big_picture, S.lensTitle);
+  const upd = $('#bigpic-upd');
+  if (upd) upd.textContent = '';
+  loadBriefing(false);
+};
+
 function bigPicture(b) {
   if (!b) return '';
-  return `<section class="panel"><h2>The big picture</h2>
-    <h3 style="margin-top:10px">${esc(b.theme_title || 'The AI trade')}</h3><p class="small">${narr(b.theme || b.ai)}</p>
-    <h3 style="margin-top:12px">Markets and the economy</h3><p class="small">${narr(b.markets)}</p>
-    <h3 style="margin-top:12px">What it means for your portfolio</h3><p class="small">${narr(b.portfolio)}</p>
-    <p class="note" style="margin-top:10px">Written from today\u2019s readings by fixed rules. Not advice.</p>
+  S.mainPicture = b;
+  return `<section class="panel" id="bigpic"><div class="spread"><h2>The big picture</h2><span class="tiny muted" id="bigpic-upd"></span></div>
+    <div id="bigpic-body">${bigPictureInner(b)}</div>
   </section>`;
 }
+function bigPictureInner(b, title) {
+  if (!b) return '';
+  return `<h3 style="margin-top:10px">${esc(b.theme_title || title || 'The AI trade')}</h3><p class="small">${narr(b.theme || b.ai)}</p>
+    <h3 style="margin-top:12px">Markets and the economy</h3><p class="small">${narr(b.markets)}</p>
+    <h3 style="margin-top:12px">What it means for your portfolio</h3><p class="small">${narr(b.portfolio)}</p>
+    <p class="note" style="margin-top:10px">Written from today’s readings by fixed rules. Not advice.</p>`;
+}
+
+// Claude's version replaces the fixed-rule one when this device has a key. The Overview never
+// waits for it: the rule-based text shows first and is swapped when Claude's arrives.
+async function loadBriefing(refresh) {
+  clearTimeout(S.briefTimer);
+  if (!$('#bigpic-body')) return;
+  let r;
+  const lens = S.lens || 'ai';
+  try { r = await api('/api/briefing?lens=' + encodeURIComponent(lens) + (refresh ? '&refresh=1' : '')); } catch { return; }
+  const body = $('#bigpic-body'), upd = $('#bigpic-upd');
+  if (!body || !r.enabled || (S.lens || 'ai') !== lens) return;
+  if (!r.text && upd) upd.textContent = '';
+  const theme = S.lensTitle || 'The AI trade';
+  if (r.text) {
+    const t = r.text;
+    body.innerHTML = `${t.headline ? `<p style="margin:10px 0 0"><b>${esc(t.headline)}</b></p>` : ''}
+      <h3 style="margin-top:12px">${esc(theme)}</h3><p class="small">${esc(t.theme)}</p>
+      <h3 style="margin-top:12px">Markets and the economy</h3><p class="small">${esc(t.markets)}</p>
+      <h3 style="margin-top:12px">What it means for your portfolio</h3><p class="small">${esc(t.portfolio)}</p>
+      ${r.sources.length ? `<p class="tiny muted" style="margin-top:10px">Sources: ${r.sources.map(x => { let h = x.url; try { h = new URL(x.url).hostname.replace(/^www\./, ''); } catch {} return `<a href="${esc(x.url)}" rel="noopener noreferrer" title="${esc(x.title)}">${esc(h)}</a>`; }).join(' · ')}</p>` : ''}
+      <div class="spread" style="margin-top:10px"><p class="note" style="margin:0">Written by Claude from today’s readings and the latest news. It can get things wrong. Not advice.</p>
+      <button class="btn small" data-act="brief-rewrite">${r.writing ? 'Writing…' : 'Rewrite now'}</button></div>`;
+  }
+  if (upd) upd.textContent = r.writing ? 'Claude is writing a fresh version…'
+    : r.problem ? (r.text ? `Couldn’t rewrite: ${r.problem}` : `Claude couldn’t write it: ${r.problem}`)
+    : r.written_at ? `Written ${ago(r.written_at)}` : '';
+  S.briefTimer = setTimeout(() => loadBriefing(false), r.writing ? 5000 : 30 * 60 * 1000);
+}
+document.addEventListener('whiskers:rendered', () => {
+  if (!$('#bigpic-body')) return;
+  S.lensTitle = (S.lensMain || {}).story || 'The AI trade';
+  let saved = null;
+  try { saved = localStorage.getItem('whiskers.lens'); } catch {}
+  const b = saved && saved !== S.lens && $(`#lens-chips [data-lens="${CSS.escape(saved)}"]`);
+  if (b) ACTS.lens(b); else loadBriefing(false);
+});
+ACTS['brief-rewrite'] = async b => { b.disabled = true; b.textContent = 'Writing…'; await loadBriefing(true); };
+
+ACTS['claude-key-save'] = async b => { await busy(b, async () => { await api('/api/briefing/key', { method: 'POST', body: { key: $('#set-claude-key').value } }); toast('Saved. The big picture will be rewritten shortly.'); render(); }); };
+ACTS['claude-key-clear'] = async b => { await busy(b, async () => { await api('/api/briefing/key', { method: 'POST', body: { key: '' } }); toast('Removed.'); render(); }); };
 
 // News: the day's five biggest business stories. Drawn after the Overview is on screen, so
 // the Overview never waits for it; the server answers from what it keeps and fetches in the
@@ -1624,6 +1743,13 @@ async function vSettings(el) {
 
 // Other screens' files add their own Settings panels here: { top, middle, bottom }.
 const SETTINGS_PANELS = { top: [], middle: [], bottom: [] };
+SETTINGS_PANELS.bottom.push(d => `<section class="panel"><h2>The big picture, written by Claude</h2>
+  <p class="small">Add your own Anthropic API key and Claude writes the Overview’s big picture from today’s readings and the latest news, a few times a day. It is sent the lights, signals, percentages, sleeve drift, your largest AI holdings by name and the headlines, never money amounts. Each version costs a few pence on your Anthropic account. The key stays on this ${onAndroid() ? 'phone' : 'computer'}.</p>
+  <div class="row" style="gap:8px;align-items:end;margin-top:8px">
+    <label class="field">API key<input type="password" id="set-claude-key" style="width:300px" placeholder="${d.briefing && d.briefing.enabled ? 'Saved. Paste a new one to replace it' : 'sk-ant-…'}" autocomplete="off"></label>
+    <button class="btn" data-act="claude-key-save">Save</button>
+    ${d.briefing && d.briefing.enabled ? '<button class="btn" data-act="claude-key-clear">Remove</button>' : ''}
+  </div></section>`);
 // Mortgage and Retirement: on or off. Nothing is deleted when one goes off.
 async function setSection(key, on) {
   await api('/api/settings', { method: 'PATCH', body: { [`show_${key}`]: !!on } });

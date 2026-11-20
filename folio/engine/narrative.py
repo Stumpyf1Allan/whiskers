@@ -115,7 +115,8 @@ def lights_story(lights: list[dict], group: str, brief: bool = False) -> str:
         if drift:
             text += f" Over the past month, {drift}, though still in the normal range."
         return text
-    parts = [f"{x['title']}: {x['level']} since {_day(x.get('since'))}{_heading(x)}" for x in bad]
+    parts = [f"{x['title']}: {x['level']} since {_day(x.get('since'))}{_heading(x)}" if x.get("since")
+             else f"{x['title']}: {x['level']} ({(x.get('words') or '').rstrip('.')})" for x in bad]
     good = len(known) - len(bad)
     text = "; ".join(parts) + "."
     if good:
@@ -279,7 +280,17 @@ def big_picture(market: dict, pb: dict | None, exp: dict, alloc: dict, totals: d
             bits.append(f"the Magnificent Seven at {m['value']:.1f}% of the S&P 500")
         if bits:
             fired = sum(1 for r in pb["signals"] if r["group"] == "ai" and r["firing"])
-            ai += f" Your AI signals: {_join(bits)} ({fired} of 3 firing)."
+            ai += f" The business numbers you track: {_join(bits)}, so {fired} of 3 of your AI signals are firing."
+            label = groups.get("ai", {}).get("label")
+            if label in ("Turning", "Watch") and not fired:
+                ai += (" So far the weakness is in prices only: by your own measures the spending and growth "
+                       "behind the AI trade haven't slowed.")
+            elif label in ("Turning", "Watch"):
+                ai += " Prices and the business numbers are both pointing the same way."
+            elif fired:
+                ai += " Prices are holding up, but some of the business numbers behind them have started to slip."
+            if any(r.get("stale") for r in pb["signals"] if r["group"] == "ai" and r.get("kind") == "manual"):
+                ai += " Those numbers are entered by hand and are due an update."
     return _portfolio_paragraphs(ai, market, pb, exp, alloc, totals, "The AI trade", "AI")
 
 

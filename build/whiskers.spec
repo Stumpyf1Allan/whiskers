@@ -43,7 +43,7 @@ hiddenimports = ["sqlite3", "webbrowser", "json", "csv", "_cffi_backend", "cffi"
                  "folio.institutions.websites", "folio.inbox", "folio.reminders", "folio.engine.sections",
                  "folio.engine.builder", "folio.engine.themes", "folio.engine.xray",
                  # 1.2: the Overview's News
-                 "folio.market.news"]
+                 "folio.market.news", "folio.market.briefing", "folio.engine.lens"]
 
 # curl_cffi carries a compiled libcurl. collect_all brings the library, its data and
 # its submodules; without it the frozen app would quietly fall back to plain urllib
