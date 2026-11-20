@@ -24,9 +24,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .. import android, config, db, inbox, net, security, sync, updates
 from ..brokers import freetrade, monzo, symbols, trading212
-from ..engine import (allocation, export, isa, mathx, narrative, plan, playbook, portfolio, rules, sample,
+from ..engine import (allocation, export, isa, lens, mathx, narrative, plan, playbook, portfolio, rules, sample,
                       sections, signals, stress, themes)
-from ..market import catalogue, news, sources, store
+from ..market import briefing, catalogue, news, sources, store
 
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
 
@@ -146,13 +146,18 @@ def api_overview(req, m, q, body):
                   | {"lights": [{k: x.get(k) for k in ("key", "title", "level", "words", "group", "since",
                                                         "direction")} for x in market["lights"]]},
         "big_picture": narrative.big_picture(market, pb, exp, alloc, tot),
+        "lenses": lens.choices(pos, tot, market),
         "isa": isa.allowance(),
         "playbook": {"firing": pb["firing"], "of": pb["of"], "known": pb["known"], "tier": pb["tier"],
                      "ai_firing": sum(1 for r in pb["signals"] if r["group"] == "ai" and r["firing"]),
                      "main_firing": sum(1 for r in pb["signals"] if r["group"] == (market.get("watch") or {}).get("main")
                                         and r["firing"]),
                      "main_of": sum(1 for r in pb["signals"] if r["group"] == (market.get("watch") or {}).get("main")),
-                     "drop": pb["ladder"]["drop"]},
+                     "drop": pb["ladder"]["drop"],
+                     "main_signals": [{k: r.get(k) for k in ("key", "title", "value", "threshold", "op", "unit",
+                                                             "firing", "updated", "stale", "kind")}
+                                      for r in pb["signals"]
+                                      if r["group"] == ((market.get("watch") or {}).get("main") or "ai")]},
         "history": {"points": [[d, v] for d, v in mathx.thin(back["points"], 520)],
                     "coverage": back["coverage"], "missing": back["missing"],
                     "worst": back.get("worst")},
@@ -576,6 +581,7 @@ def api_settings(req, m, q, body):
         "version": config.APP_VERSION, "sample": sample.loaded(),
         "plan_loaded": db.get_meta("plan_loaded"),
         "sync": sync.status(),
+        "briefing": {"enabled": briefing.has_key()},
     }
 
 
@@ -995,6 +1001,48 @@ def api_news(req, m, q, body):
         return {"enabled": False}
     news.refresh(force=q.get("refresh") == "1")
     return news.state()
+
+
+# ============================================================================ lenses
+
+@route("GET", "/api/lens")
+def api_lens(req, m, q, body):
+    """The Overview's dial and big picture for one lens: the main watch, the whole market,
+    your portfolio or one of your biggest sectors."""
+    pos, tot, alloc, exp, market, warns, back, pb, ht = _everything()
+    try:
+        return lens.view(q.get("key") or "ai", pos, tot, alloc, exp, market, pb, back)
+    except ValueError as e:
+        raise ApiError(str(e))
+
+
+# ============================================================================ the big picture by Claude
+
+@route("GET", "/api/briefing")
+def api_briefing(req, m, q, body):
+    """Claude's big picture, if this device has a key. Answers at once from what is kept and
+    writes a fresh one in the background when due (`refresh=1` is the Rewrite button)."""
+    key = q.get("lens") or "ai"
+    if not briefing.has_key():
+        return briefing.state(key)
+    pos, tot, alloc, exp, market, warns, back, pb, ht = _everything()
+    try:
+        focus = lens.view(key, pos, tot, alloc, exp, market, pb, back)
+    except ValueError as e:
+        raise ApiError(str(e))
+    heads = news.state().get("items", []) if config.settings.get("show_news", True) else []
+    briefing.refresh(briefing.facts(market, pb, exp, alloc, warns, heads, focus), key,
+                     force=q.get("refresh") == "1")
+    return briefing.state(key)
+
+
+@route("POST", "/api/briefing/key")
+def api_briefing_key(req, m, q, body):
+    try:
+        briefing.set_key((body or {}).get("key", ""))
+    except ValueError as e:
+        raise ApiError(str(e))
+    return briefing.state()
 
 
 # ============================================================================ updates, links

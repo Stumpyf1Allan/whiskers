@@ -284,6 +284,12 @@ CREATE TABLE IF NOT EXISTS networth(
 CREATE TABLE IF NOT EXISTS news(
   id INTEGER PRIMARY KEY CHECK (id = 1), fetched_at TEXT, data TEXT
 );
+
+-- 1.2: the big picture for each lens as Claude last wrote it (only with the owner's own API key). This
+-- device only, like the news.
+CREATE TABLE IF NOT EXISTS briefings(
+  key TEXT PRIMARY KEY, written_at TEXT, data TEXT
+);
 """
 
 #: (table, column, definition) — applied on every start, idempotently.

@@ -1670,3 +1670,21 @@ def test_a_treasury_bill_shows_its_value_source_in_plain_words():
     hold = {c.value: i - 1 for i, c in enumerate(next(wb["Holdings"].iter_rows(min_row=1, max_row=1)), 1)}
     row = next(wb["Holdings"].iter_rows(min_row=2, max_row=2))
     assert row[hold["Value source"]].value == "Treasury bill, at cost"
+
+
+def test_every_lens_answers_with_the_sample_loaded(server):
+    """1.2: the Overview's buttons: the main watch, the whole market, your portfolio and your
+    biggest sectors, each with a dial word, lights and a fixed-rule big picture."""
+    import json
+    sample.load()
+    status, body, _ = _req(server, "/api/overview")
+    keys = [c["key"] for c in json.loads(body)["lenses"]]
+    assert keys[:3] == ["ai", "market", "portfolio"] and len(keys) <= 7
+    for key in keys:
+        status, body, _ = _req(server, f"/api/lens?key={key}")
+        assert status == 200, (key, body[:300])
+        v = json.loads(body)
+        assert v["label"] in ("Calm", "Watch", "Turning", "No data") and v["big_picture"]["theme"]
+    assert _req(server, "/api/lens?key=nonsense")[0] == 400
+    pf = json.loads(_req(server, "/api/lens?key=portfolio")[1])
+    assert [x["key"] for x in pf["lights"]] == ["pf_trend", "pf_fall", "pf_bands"]

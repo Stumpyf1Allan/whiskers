@@ -37,9 +37,9 @@ names, account details or keys.
 | `folio/config.py` | Name, version, settings defaults (`DEFAULTS`), the update address |
 | `folio/db.py` | The SQLite schema; new columns go in `ADDED_COLUMNS` (never rename or drop) |
 | `folio/sync.py` | The phone's copy through OneDrive: `TABLES` and `SETTINGS` that travel |
-| `folio/engine/` | The calculations: `portfolio`, `allocation`, `rules` (caps, parachute steps), `plan` (plan files), `builder` (the plan builder), `sections`, `retirement`, `pensions`, `statepension`, `mortgage`, `themes`, `signals`, `classify`, `xray`, `stress`, `export`, `ukrules` (dated UK figures, with sources) |
+| `folio/engine/` | The calculations: `portfolio`, `allocation`, `rules` (caps, parachute steps), `plan` (plan files), `builder` (the plan builder), `sections`, `retirement`, `pensions`, `statepension`, `mortgage`, `themes`, `signals`, `lens` (the Overview's buttons: main watch, whole market, your portfolio, top sectors), `classify`, `xray`, `stress`, `export`, `ukrules` (dated UK figures, with sources) |
 | `folio/brokers/` | Trading 212, Freetrade, Monzo. Read-only: a test fails if an order call appears |
-| `folio/market/` | Prices: `sources.py`, `store.py`, `catalogue.py` (the series); `news.py` (the Overview's News: five outlets' feeds, grouped and ranked, kept in the device-only `news` table) |
+| `folio/market/` | Prices: `sources.py`, `store.py`, `catalogue.py` (the series); `news.py` (the Overview's News: five outlets' feeds, grouped and ranked, kept in the device-only `news` table); `briefing.py` (the big picture written by Claude with the owner's own API key, per lens, device-only `briefings` table; never sends amounts) |
 | `folio/importers/`, `inbox.py`, `reminders.py` | Files in, the statements folder, the monthly reminder |
 | `folio/institutions/` | The list of UK and South African firms |
 | `folio/web/server.py` | The HTTP server, `@route`, `ApiError`, `SETTABLE` (settings the page may change) |
@@ -47,7 +47,7 @@ names, account details or keys.
 | `folio/web/static/` | `index.html`; `app.js` (the core: `VIEWS`, `ACTS`, `wire()`, `render()`, `SETTINGS_PANELS`); `builder.js`, `mortgage.js`, `retirement.js`, `importer.js`, which load after `app.js` and add their own `VIEWS` and `ACTS`; `charts.js`; `styles.css` |
 | `android/` | The Android app (`android/RELEASE.md`) |
 | `build/` | `whiskers.spec` (PyInstaller: add new modules to `hiddenimports`), `build_windows.bat` |
-| `tests/` | pytest: `test_whiskers.py` (core), `test_sections.py` (1.1), `test_sync.py`, `test_updates.py`, `test_news.py` (1.2) |
+| `tests/` | pytest: `test_whiskers.py` (core), `test_sections.py` (1.1), `test_sync.py`, `test_updates.py`, `test_news.py`, `test_briefing.py` (1.2) |
 
 ## Running and testing
 
