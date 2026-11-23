@@ -57,6 +57,8 @@ def _startup_jobs():
     try:
         from . import updates
         updates.start_up()
+        from . import selfupdate
+        selfupdate.start_auto()
     except Exception:
         logging.exception("update check failed to start")
 

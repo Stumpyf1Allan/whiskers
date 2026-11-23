@@ -119,6 +119,7 @@ html.hide svg .ymoney { visibility: hidden; }
           border-bottom: 1px solid var(--line); }
 .banner.fake { background: #b3261e; color: #fff; font-weight: 600; }
 .banner.update { background: var(--accent-soft); }
+.banner.update progress { width: 220px; height: 8px; accent-color: var(--accent); }
 
 @media (max-width: 900px) {
   :root { --rail: 64px; }

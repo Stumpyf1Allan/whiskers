@@ -23,7 +23,7 @@ APP_NAME = "Whiskers"
 #: separator in batch files, and the next name might not be one plain word.
 APP_FILE_NAME = "Whiskers"
 APP_SLUG = "whiskers"
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.4.3"
 APP_TAGLINE = "Investment tracker"
 
 #: Where every copy looks for new versions: the latest GitHub release of the repository.
@@ -59,6 +59,8 @@ MINOR_UNIT_CURRENCIES = {
 DEFAULTS = {
     "check_for_updates": True,
     "auto_download_updates": True,
+    #: Windows one-.exe copies: put a downloaded update in place and restart by themselves.
+    "auto_install_updates": True,
     "update_url": "",
     #: Stocks and shares ISA subscription limit per tax year. A setting, not a
     #: constant, because the Chancellor can change it and the app should not need a
