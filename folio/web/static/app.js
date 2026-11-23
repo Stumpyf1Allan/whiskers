@@ -654,6 +654,8 @@ async function loadBriefing(refresh) {
   if (upd) upd.textContent = r.writing ? 'Claude is writing a fresh version…'
     : r.problem ? (r.text ? `Couldn’t rewrite: ${r.problem}` : `Claude couldn’t write it: ${r.problem}`)
     : r.written_at ? `Written ${ago(r.written_at)}` : '';
+  if (upd && r.problem && !r.text && !r.writing)
+    upd.insertAdjacentHTML('beforeend', ' <button class="btn small" data-act="brief-rewrite">Try again</button>');
   S.briefTimer = setTimeout(() => loadBriefing(false), r.writing ? 5000 : 30 * 60 * 1000);
 }
 document.addEventListener('whiskers:rendered', () => {

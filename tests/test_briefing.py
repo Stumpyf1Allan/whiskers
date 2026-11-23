@@ -91,5 +91,15 @@ def test_work_asks_again_for_just_the_json(monkeypatch):
     monkeypatch.setattr(briefing, "_post", fake_post)
     monkeypatch.setattr(briefing.security, "get", lambda ref: {"key": "k"})
     briefing._work(_facts(), "fp", "ai")
-    assert len(calls) == 3 and "tools" not in calls[2]
+    assert len(calls) == 3 and calls[2]["tool_choice"]["name"] == "write_big_picture"
+    assert [t["name"] for t in calls[2]["tools"]] == ["write_big_picture"]
     assert briefing.state("ai")["text"]["theme"] == "T"
+
+
+def test_parse_reads_the_tool_call():
+    resp = {"stop_reason": "tool_use", "content": [
+        {"type": "text", "text": "Here it is."},
+        {"type": "tool_use", "name": "write_big_picture",
+         "input": {"headline": "H", "theme": "T", "markets": "M", "portfolio": "P"}}]}
+    out = briefing.parse(resp)
+    assert out["theme"] == "T" and out["headline"] == "H"
