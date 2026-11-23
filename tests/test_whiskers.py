@@ -151,6 +151,17 @@ def test_pence_are_turned_into_pounds_case_sensitively():
     assert pounds["points"][0][1] == 17.2        # "GBP" is pounds already
 
 
+def test_fred_is_asked_with_a_name_and_version_user_agent(monkeypatch):
+    # FRED leaves "Whiskers (personal portfolio app)" hanging; "Whiskers/1.4.3 (+url)" works.
+    seen = {}
+    def fake_get(url, **kw):
+        seen.update(kw.get("headers") or {})
+        return b"observation_date,X\n2026-01-02,1.5\n"
+    monkeypatch.setattr(sources.net, "get", fake_get)
+    assert sources.fred("X")["points"] == [("2026-01-02", 1.5)]
+    assert seen["User-Agent"].startswith("Whiskers/") and "(+https://" in seen["User-Agent"]
+
+
 def test_fred_csv_handles_both_headers_and_gaps():
     old = "DATE,VIXCLS\n2026-01-02,14.5\n2026-01-05,.\n2026-01-06,15.1\n"
     new = "observation_date,VIXCLS\n2026-01-02,14.5\n2026-01-05,\n"

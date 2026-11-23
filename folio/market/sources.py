@@ -39,6 +39,11 @@ from .. import config, net
 
 YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range={rng}&interval=1d"
 FRED_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}"
+#: FRED's front door leaves some requests hanging with no answer, chosen by their
+#: User-Agent: "Whiskers (personal portfolio app)" and a browser name sent by a non-browser
+#: both waited forever on GitHub's machines (Nov 2026), while the usual `Name/version
+#: (+address)` form answered at once. So FRED gets that form.
+FRED_UA = f"Whiskers/{config.APP_VERSION} (+https://github.com/Stumpyf1Allan/whiskers)"
 STOOQ_CSV = "https://stooq.com/q/d/l/?s={sym}&i=d&apikey={key}"
 ONS_JSON = "https://www.ons.gov.uk/{path}/data"
 
@@ -149,7 +154,8 @@ def parse_fred_csv(text: str) -> list[tuple[str, float]]:
 
 def fred(series_id: str) -> dict:
     try:
-        body = net.get(FRED_CSV.format(sid=urllib.parse.quote(series_id)), timeout=25)
+        body = net.get(FRED_CSV.format(sid=urllib.parse.quote(series_id)), timeout=25,
+                       headers={"User-Agent": FRED_UA})
     except net.FetchError as e:
         raise SourceError(f"FRED: {e}") from None
     text = body.decode("utf-8", "replace")
