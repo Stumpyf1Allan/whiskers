@@ -35,3 +35,8 @@ install: Callable[[str], str] | None = None
 #: {"error": reason}. The app keeps permission to read that one file, so it works on
 #: later days too (folio/sync.py).
 read_document: Callable[[str], dict] | None = None
+
+#: Save over that same file (1.4: every device writes the shared copy):
+#: (content:// address, body as base64) -> {"ok": True} or {"error": reason}. Needs the
+#: file to have been chosen with permission to write, which 1.3 didn't ask for.
+write_document: Callable[[str, str], dict] | None = None

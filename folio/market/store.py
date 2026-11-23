@@ -321,11 +321,8 @@ def start_refresh(force: bool = False, before=None) -> bool:
                 overall.take_snapshot()
             except Exception as e:
                 db.log("networth.error", str(e))
-            try:
-                from .. import sync
-                sync.after_change()          # the PC: the phone's copy gets these figures too
-            except Exception as e:
-                db.log("sync.error", str(e))
+            # Refreshed figures aren't changes for the shared copy (sync.py): each device
+            # refreshes its own, so a refresh never outranks someone's edits.
         finally:
             JOB.update(running=False, finished=db.now(), current="", phase="")
 

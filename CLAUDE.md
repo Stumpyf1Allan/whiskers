@@ -36,7 +36,7 @@ names, account details or keys.
 | `run_whiskers.py` | Starts the app; `--no-window --port N` for the server alone |
 | `folio/config.py` | Name, version, settings defaults (`DEFAULTS`), the update address |
 | `folio/db.py` | The SQLite schema; new columns go in `ADDED_COLUMNS` (never rename or drop) |
-| `folio/sync.py` | The phone's copy through OneDrive: `TABLES` and `SETTINGS` that travel |
+| `folio/sync.py` | Two-way sync of every device through one encrypted file in OneDrive (1.4: newest change wins, the loser keeps a dated backup): `TABLES` and `SETTINGS` that travel |
 | `folio/engine/` | The calculations: `portfolio`, `allocation`, `rules` (caps, parachute steps), `plan` (plan files), `builder` (the plan builder), `sections`, `retirement`, `pensions`, `statepension`, `mortgage`, `themes`, `signals`, `lens` (the Overview's buttons: main watch, whole market, your portfolio, top sectors), `classify`, `xray`, `stress`, `export`, `ukrules` (dated UK figures, with sources) |
 | `folio/brokers/` | Trading 212, Freetrade, Monzo. Read-only: a test fails if an order call appears |
 | `folio/market/` | Prices: `sources.py`, `store.py`, `catalogue.py` (the series); `news.py` (the Overview's News: five outlets' feeds, grouped and ranked, kept in the device-only `news` table); `briefing.py` (the big picture written by Claude with the owner's own API key, per lens, device-only `briefings` table; never sends amounts) |
