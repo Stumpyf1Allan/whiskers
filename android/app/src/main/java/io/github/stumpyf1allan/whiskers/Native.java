@@ -17,6 +17,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Iterator;
@@ -177,6 +178,42 @@ public final class Native {
             return new JSONObject().put("body", Base64.encodeToString(body, Base64.NO_WRAP)).toString();
         } catch (SecurityException e) {
             return error("Whiskers is no longer allowed to read that file, so choose it again", false);
+        } catch (Exception e) {
+            return error(e.getClass().getSimpleName() + ": " + e.getMessage(), looksOffline(e));
+        }
+    }
+
+    /**
+     * Save over the file chosen in the picker (1.4: every device writes the shared copy),
+     * in one go. Returns JSON {ok: true}, or {error, offline}. Mode "wt" truncates; a
+     * provider that refuses it gets "w", and the result is read back so a longer old file
+     * left behind is caught rather than trusted.
+     */
+    public static String writeDocument(String uri, String bodyBase64) {
+        if (app == null) return error("the app isn't ready yet", false);
+        Uri u = Uri.parse(uri);
+        if (!"content".equals(u.getScheme())) return error("not a file chosen in the picker", false);
+        try {
+            byte[] body = Base64.decode(bodyBase64, Base64.NO_WRAP);
+            OutputStream out;
+            try {
+                out = app.getContentResolver().openOutputStream(u, "wt");
+            } catch (IllegalArgumentException | UnsupportedOperationException | java.io.FileNotFoundException e) {
+                Log.w(TAG, "\"wt\" refused for " + u + "; using \"w\"", e);
+                out = app.getContentResolver().openOutputStream(u, "w");
+            }
+            if (out == null) return error("the file couldn't be opened to save", false);
+            try (OutputStream s = out) {
+                s.write(body);
+                s.flush();
+            }
+            InputStream check = app.getContentResolver().openInputStream(u);
+            if (check != null && readAll(check).length != body.length) {
+                return error("the cloud app didn't save the whole file", false);
+            }
+            return new JSONObject().put("ok", true).toString();
+        } catch (SecurityException e) {
+            return error("Whiskers isn't allowed to save to that file, so choose it again in Settings", false);
         } catch (Exception e) {
             return error(e.getClass().getSimpleName() + ": " + e.getMessage(), looksOffline(e));
         }

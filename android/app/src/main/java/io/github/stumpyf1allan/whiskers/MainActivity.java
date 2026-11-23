@@ -313,15 +313,16 @@ public class MainActivity extends Activity implements PythonServer.Listener {
     }
 
     /**
-     * The PC's copy of Whiskers, chosen once in Android's own picker, which can open files
-     * in OneDrive or Google Drive. Whiskers keeps permission to read that one file, so the
-     * phone can load it again whenever it opens (folio/sync.py).
+     * The shared copy of Whiskers, chosen once in Android's own picker, which can open files
+     * in OneDrive or Google Drive. Whiskers keeps permission to read and write that one file,
+     * so the phone can load it whenever it opens and save its own changes (folio/sync.py).
      */
     void pickSyncFile() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
         i.setType("*/*");
-        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         try {
             startActivityForResult(i, PICK_SYNC);
         } catch (ActivityNotFoundException e) {
@@ -332,9 +333,15 @@ public class MainActivity extends Activity implements PythonServer.Listener {
     private void syncFileChosen(Uri u) {
         if (u == null || web == null) return;
         try {
-            getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            getContentResolver().takePersistableUriPermission(u,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
         } catch (SecurityException e) {
-            Log.w(TAG, "No lasting permission to read " + u, e);
+            Log.w(TAG, "No lasting permission to write " + u + "; asking to read only", e);
+            try {
+                getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (SecurityException e2) {
+                Log.w(TAG, "No lasting permission to read " + u, e2);
+            }
         }
         String name = "";
         try (Cursor c = getContentResolver().query(u, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
@@ -363,7 +370,7 @@ public class MainActivity extends Activity implements PythonServer.Listener {
         super.onActivityResult(request, result, data);
     }
 
-    /** Back at the front: the page loads the PC's copy if it has changed since (folio/sync.py). */
+    /** Back at the front: the page loads the shared copy if it has changed since (folio/sync.py). */
     @Override
     protected void onResume() {
         super.onResume();

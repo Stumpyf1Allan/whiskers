@@ -949,20 +949,22 @@ def api_sample_remove(req, m, q, body):
 # ============================================================================ refreshing
 
 def _sync_brokers():
-    if sync.role() != "phone":
+    if sync.role():                  # the shared copy first, so everything else lands on top
+        store.JOB.update(current="Your shared copy")
+        try:
+            sync.pull()
+        except sync.SyncError as e:
+            store.JOB["errors"].append({"key": "Your shared copy", "message": str(e)})
+    if not (config.android() and sync.role()):
         store.JOB.update(current="Your statements folder")
         try:
             got = inbox.import_waiting()
             for left in got["left"]:
                 store.JOB["errors"].append({"key": left["file"], "message": left["why"]})
+            if got["done"]:
+                sync.after_change()  # imported trades are real changes: the others get them
         except Exception as e:
             store.JOB["errors"].append({"key": "Statements folder", "message": str(e)})
-    if sync.role() == "phone":       # the PC's copy first, so the brokers update on top of it
-        store.JOB.update(current="Your PC's copy")
-        try:
-            sync.pull()
-        except sync.SyncError as e:
-            store.JOB["errors"].append({"key": "Your PC's copy", "message": str(e)})
     freetrade.rebuild_all()          # bills that matured since the last import drop out
     for p in db.rows("SELECT id, name FROM platforms WHERE provider='bank'"):
         if monzo.linked(p["id"]):
@@ -1135,7 +1137,7 @@ def api_open_url(req, m, q, body):
         return {"opened": False, "problem": str(e), "url": url}
 
 
-# ============================================================================ the phone's copy
+# ============================================================================ the shared copy
 
 @route("GET", "/api/sync")
 def api_sync_state(req, m, q, body):
@@ -1144,7 +1146,7 @@ def api_sync_state(req, m, q, body):
 
 @route("POST", "/api/sync/pc")
 def api_sync_pc(req, m, q, body):
-    """The PC: start keeping an encrypted copy for the phone in a folder (OneDrive)."""
+    """A computer: keep in step through an encrypted copy in a folder (OneDrive)."""
     b = body or {}
     try:
         return sync.setup_pc(str(b.get("folder") or ""), str(b.get("passphrase") or ""))
@@ -1162,7 +1164,7 @@ def api_sync_write(req, m, q, body):
 
 @route("POST", "/api/sync/phone")
 def api_sync_phone(req, m, q, body):
-    """The phone: follow the file chosen in Android's picker, loading it now."""
+    """A phone: keep in step through the file chosen in Android's picker, loading it now."""
     b = body or {}
     try:
         out = sync.setup_phone(str(b.get("uri") or ""), str(b.get("passphrase") or ""),
@@ -1175,8 +1177,8 @@ def api_sync_phone(req, m, q, body):
 
 @route("POST", "/api/sync/pull")
 def api_sync_pull(req, m, q, body):
-    """The phone, on opening or coming back to the front: load the PC's copy if it is new.
-    A load replaces Trading 212's figures with the PC's, so a refresh follows it."""
+    """Any device, on opening or coming back to the front: load the shared copy if another
+    device saved since. A load replaces Trading 212's figures, so a refresh follows it."""
     try:
         out = sync.pull(force=bool((body or {}).get("force")) if isinstance(body, dict) else False)
     except sync.SyncError as e:
@@ -1186,13 +1188,18 @@ def api_sync_pull(req, m, q, body):
     return out
 
 
+@route("POST", "/api/sync/note-seen")
+def api_sync_note_seen(req, m, q, body):
+    return sync.clear_note()
+
+
 @route("DELETE", "/api/sync")
 def api_sync_stop(req, m, q, body):
     return sync.stop()
 
 
 #: Requests that change nothing the phone's copy holds, or that look after it themselves.
-_NOT_A_CHANGE = ("/api/sync", "/api/news", "/api/update", "/api/refresh", "/api/open-", "/api/check-symbol",
+_NOT_A_CHANGE = ("/api/sync", "/api/news", "/api/briefing", "/api/update", "/api/refresh", "/api/open-", "/api/check-symbol",
                  "/api/retirement/what-if", "/api/import/analyse", "/api/inbox/open",
                  "/api/plan/build", "/api/allocation/new-money")
 
@@ -1313,7 +1320,7 @@ class Handler(BaseHTTPRequestHandler):
                                       {"Content-Disposition":
                                        f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quoted}'})
                 if method != "GET" and not path.startswith(_NOT_A_CHANGE):
-                    sync.after_change()          # the PC: refresh the phone's copy shortly
+                    sync.after_change()          # save the shared copy shortly
                 return self._json(out)
             except ApiError as e:
                 return self._json({"error": e.message}, e.status)
