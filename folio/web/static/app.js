@@ -275,7 +275,7 @@ function pickFile(accept) {
 
 async function busy(btn, fn) {
   const old = btn ? btn.innerHTML : '';
-  if (btn) { btn.disabled = true; btn.innerHTML = 'Working\u2026'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin-sm" aria-hidden="true"></span>Working\u2026'; }
   try { return await fn(); }
   catch (e) { toast(e.message, true); return null; }
   finally { if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = old; } }
@@ -370,15 +370,18 @@ async function checkUpdateBanner() {
   try { u = await api('/api/update'); } catch { return; }
   const b = $('#update-banner');
   if (!u.show_banner) { b.hidden = true; return; }
-  const ready = u.status === 'ready';
+  const ready = u.status === 'ready', getting = u.status === 'downloading';
   b.innerHTML = `<span><b>Whiskers ${esc(u.latest)} is available.</b> ${esc(u.notes || '')}</span>` +
     (ready ? `<button class="btn small primary" data-act="upd-reveal">${onAndroid() ? 'Install it' : 'Show the new version'}</button>`
+           : getting ? `<span class="tiny"><span class="spin-sm" aria-hidden="true"></span>Downloading${u.progress ? ' ' + Math.round(u.progress * 100) + '%' : ''}\u2026 please wait</span>`
            : `<button class="btn small" data-act="upd-download">Download it</button>`) +
     `<button class="btn small ghost" data-act="upd-dismiss">Not now</button>`;
   b.hidden = false;
   wire(b);
+  clearTimeout(S.updTimer);
+  if (getting) S.updTimer = setTimeout(checkUpdateBanner, 1500);
 }
-ACTS['upd-download'] = async btn => { await busy(btn, () => api('/api/update/download', { method: 'POST' })); setTimeout(checkUpdateBanner, 4000); };
+ACTS['upd-download'] = async btn => { await busy(btn, () => api('/api/update/download', { method: 'POST' })); checkUpdateBanner(); };
 ACTS['upd-reveal'] = async () => {
   try {
     const r = await api('/api/update/reveal', { method: 'POST' });
@@ -649,13 +652,15 @@ async function loadBriefing(refresh) {
       <h3 style="margin-top:12px">What it means for your portfolio</h3><p class="small">${esc(t.portfolio)}</p>
       ${r.sources.length ? `<p class="tiny muted" style="margin-top:10px">Sources: ${r.sources.map(x => { let h = x.url; try { h = new URL(x.url).hostname.replace(/^www\./, ''); } catch {} return `<a href="${esc(x.url)}" rel="noopener noreferrer" title="${esc(x.title)}">${esc(h)}</a>`; }).join(' · ')}</p>` : ''}
       <div class="spread" style="margin-top:10px"><p class="note" style="margin:0">Written by Claude from today’s readings and the latest news. It can get things wrong. Not advice.</p>
-      <button class="btn small" data-act="brief-rewrite">${r.writing ? 'Writing…' : 'Rewrite now'}</button></div>`;
+      <button class="btn small" data-act="brief-rewrite">${r.writing ? '<span class="spin-sm" aria-hidden="true"></span>Writing…' : 'Rewrite now'}</button></div>`;
   }
-  if (upd) upd.textContent = r.writing ? 'Claude is writing a fresh version…'
+  if (upd) upd.textContent = r.writing ? 'Claude is writing a fresh version… please wait'
     : r.problem ? (r.text ? `Couldn’t rewrite: ${r.problem}` : `Claude couldn’t write it: ${r.problem}`)
     : r.written_at ? `Written ${ago(r.written_at)}` : '';
+  if (upd && r.writing) upd.insertAdjacentHTML('afterbegin', '<span class="spin-sm" aria-hidden="true"></span>');
   if (upd && r.problem && !r.text && !r.writing)
     upd.insertAdjacentHTML('beforeend', ' <button class="btn small" data-act="brief-rewrite">Try again</button>');
+  wire($('#bigpic'));
   S.briefTimer = setTimeout(() => loadBriefing(false), r.writing ? 5000 : 30 * 60 * 1000);
 }
 document.addEventListener('whiskers:rendered', () => {
@@ -666,7 +671,7 @@ document.addEventListener('whiskers:rendered', () => {
   const b = saved && saved !== S.lens && $(`#lens-chips [data-lens="${CSS.escape(saved)}"]`);
   if (b) ACTS.lens(b); else loadBriefing(false);
 });
-ACTS['brief-rewrite'] = async b => { b.disabled = true; b.textContent = 'Writing…'; await loadBriefing(true); };
+ACTS['brief-rewrite'] = async b => { b.disabled = true; b.innerHTML = '<span class="spin-sm" aria-hidden="true"></span>Writing…'; await loadBriefing(true); };
 
 ACTS['claude-key-save'] = async b => { await busy(b, async () => { await api('/api/briefing/key', { method: 'POST', body: { key: $('#set-claude-key').value } }); toast('Saved. The big picture will be rewritten shortly.'); render(); }); };
 ACTS['claude-key-clear'] = async b => { await busy(b, async () => { await api('/api/briefing/key', { method: 'POST', body: { key: '' } }); toast('Removed.'); render(); }); };
