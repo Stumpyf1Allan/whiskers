@@ -24,9 +24,11 @@ names, account details or keys.
 
 ## Branches
 
-- `news`: 1.2.0 work in progress (the Overview's News panel); not released.
-- `main`: the released version, 1.1.1 (optional Mortgage and Retirement sections, the plan
-  builder; docs/WHISKERS-1.1.md describes it). Start new work on a branch from `main`.
+Only two branches live on GitHub:
+
+- `main`: the released version, 1.4.3 (tag `v1.4.3`): two-way sync, the AI watch's lenses and
+  big picture, and automatic updates on Windows one-.exe copies. Start new work on a branch
+  from `main`, and delete that branch once its PR is merged.
 - `mega`: the abandoned 2.0 experiment, kept as a box of parts. Never merge it.
 
 ## Where things are
@@ -38,6 +40,7 @@ names, account details or keys.
 | `folio/db.py` | The SQLite schema; new columns go in `ADDED_COLUMNS` (never rename or drop) |
 | `folio/sync.py` | Two-way sync of every device through one encrypted file in OneDrive (1.4: newest change wins, the loser keeps a dated backup): `TABLES` and `SETTINGS` that travel |
 | `folio/engine/` | The calculations: `portfolio`, `allocation`, `rules` (caps, parachute steps), `plan` (plan files), `builder` (the plan builder), `sections`, `retirement`, `pensions`, `statepension`, `mortgage`, `themes`, `signals`, `lens` (the Overview's buttons: main watch, whole market, your portfolio, top sectors), `classify`, `xray`, `stress`, `export`, `ukrules` (dated UK figures, with sources) |
+| `folio/updates.py`, `selfupdate.py` | Finding, downloading and verifying a new version; on Windows one-.exe copies, `selfupdate.start_auto()` checks every 3 h and replaces the exe once the page has been idle 2 min (setting `auto_install_updates`) |
 | `folio/brokers/` | Trading 212, Freetrade, Monzo. Read-only: a test fails if an order call appears |
 | `folio/market/` | Prices: `sources.py`, `store.py`, `catalogue.py` (the series); `news.py` (the Overview's News: five outlets' feeds, grouped and ranked, kept in the device-only `news` table); `briefing.py` (the big picture written by Claude with the owner's own API key, per lens, device-only `briefings` table; never sends amounts) |
 | `folio/importers/`, `inbox.py`, `reminders.py` | Files in, the statements folder, the monthly reminder |
@@ -46,8 +49,9 @@ names, account details or keys.
 | `folio/web/routes2.py` | Routes for the builder, sections, mortgage, retirement and import |
 | `folio/web/static/` | `index.html`; `app.js` (the core: `VIEWS`, `ACTS`, `wire()`, `render()`, `SETTINGS_PANELS`); `builder.js`, `mortgage.js`, `retirement.js`, `importer.js`, which load after `app.js` and add their own `VIEWS` and `ACTS`; `charts.js`; `styles.css` |
 | `android/` | The Android app (`android/RELEASE.md`) |
-| `build/` | `whiskers.spec` (PyInstaller: add new modules to `hiddenimports`), `build_windows.bat` |
-| `tests/` | pytest: `test_whiskers.py` (core), `test_sections.py` (1.1), `test_sync.py`, `test_updates.py`, `test_news.py`, `test_briefing.py` (1.2) |
+| `build/` | `whiskers.spec` (PyInstaller: add new modules to `hiddenimports`), `build_windows.bat`, `build_macos.sh` |
+| `.github/workflows/` | `release.yml` (Windows and Mac builds for a `v*` tag), `android.yml` (phone build on a push to `main` touching `folio/` or `android/`). Every action is pinned to a commit SHA |
+| `tests/` | pytest: `test_whiskers.py` (core), `test_sections.py` (1.1), `test_news.py` (1.2), `test_briefing.py` (1.3), `test_sync.py` (1.4 two-way sync), `test_updates.py` (updates and self-update) |
 
 ## Running and testing
 
@@ -59,7 +63,8 @@ WHISKERS_DATA_DIR=/tmp/w WHISKERS_FAKE_MARKET=1 python run_whiskers.py --no-wind
 - Static files are served from the root (`/app.js`) and the API under `/api/` (`/api/bootstrap`).
 - `WHISKERS_FAKE_MARKET=1` invents repeatable prices. Never point `WHISKERS_DATA_DIR` at a
   real data folder.
-- `Try Whiskers 1.1 (test copy).bat` keeps its own data folder. Leave `Start Whiskers.bat` out
+- `Try Whiskers 1.1 (test copy).bat` and `Try Whiskers 1.2 (test copy).bat` keep their own
+  data folders. Leave `Start Whiskers.bat` out
   of a test zip: it opens the real one.
 - In Claude's cloud sandbox, Playwright's Chromium is at `/opt/pw-browsers`. Stop a background
   server with the task tool, not `pkill -f` on a pattern that is also in your own command.
