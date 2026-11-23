@@ -66,8 +66,7 @@ jobs:
 
       - name: Run every test first
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install pytest PyYAML "openpyxl>=3.1" "cryptography>=41"
+          python -m pip install --require-hashes -r requirements-lock.txt
           python -X warn_default_encoding -m pytest tests -q
 
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0

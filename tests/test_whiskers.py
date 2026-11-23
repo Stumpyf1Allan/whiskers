@@ -841,6 +841,32 @@ def test_the_release_build_installs_and_bundles_pdf_reading():
         assert f'"{mod}"' in spec, mod
 
 
+
+def test_ci_installs_only_hash_pinned_packages():
+    # Releases reach every Windows copy within hours, unattended, so CI must not pick
+    # up whatever a package's newest upload happens to be that day.
+    lock = (ROOT / "requirements-lock.txt").read_text(encoding="utf-8")
+    entries = re.split(r"\n(?=[A-Za-z])", lock.strip())
+    pinned = {}
+    for e in entries:
+        if e.startswith("#"):
+            continue
+        m = re.match(r"([A-Za-z0-9_.-]+)==\S+", e)
+        assert m, e[:60]
+        assert "--hash=sha256:" in e, m.group(1)
+        pinned[re.sub(r"[-_.]+", "-", m.group(1).lower())] = e
+    for f in ("requirements.txt", "requirements-dev.txt"):
+        for line in (ROOT / f).read_text(encoding="utf-8").splitlines():
+            m = re.match(r"([A-Za-z0-9_.-]+)\s*[<>=!~;]", line)
+            if m:
+                assert re.sub(r"[-_.]+", "-", m.group(1).lower()) in pinned, (f, line)
+    for wf in ("release.yml", "android.yml"):
+        text = (ROOT / ".github" / "workflows" / wf).read_text(encoding="utf-8")
+        installs = re.findall(r"pip install[^\n]*", text)
+        assert installs, wf
+        for cmd in installs:
+            assert "--require-hashes -r requirements-lock.txt" in cmd, (wf, cmd)
+
 def test_windows_scripts_have_windows_line_endings():
     for f in (ROOT / "build" / "build_windows.bat", ROOT / "Start Whiskers.bat",
               ROOT / "Try Whiskers 1.1 (test copy).bat"):
