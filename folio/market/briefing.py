@@ -53,9 +53,23 @@ Rules:
 say what the person's own rules say applies.
 - No money amounts in pounds or dollars for the person's holdings. Percentages are fine.
 - Only state news you found in the headlines given or in your searches. If unsure, leave it out.
-- Finish with a single JSON object and nothing after it: \
-{"headline": "<one sentence, at most 18 words, summing up today>", "theme": "...", \
-"markets": "...", "portfolio": "..."}"""
+- When you have finished, hand over the result by calling the write_big_picture tool once, \
+with the headline (one sentence, at most 18 words, summing up today) and the three paragraphs."""
+
+WRITE_TOOL = {
+    "name": "write_big_picture",
+    "description": "Hand over the finished big picture.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "headline": {"type": "string", "description": "One sentence, at most 18 words."},
+            "theme": {"type": "string"},
+            "markets": {"type": "string"},
+            "portfolio": {"type": "string"},
+        },
+        "required": ["headline", "theme", "markets", "portfolio"],
+    },
+}
 
 
 # ---------------------------------------------------------------------------- the key
@@ -223,7 +237,9 @@ def _text(resp: dict) -> str:
 
 def parse(resp: dict) -> dict:
     """The three paragraphs and the sources Claude used."""
-    got = _json_in(_text(resp))
+    got = next((b.get("input") for b in reversed(resp.get("content", []))
+                if b.get("type") == "tool_use" and b.get("name") == WRITE_TOOL["name"]
+                and isinstance(b.get("input"), dict)), None) or _json_in(_text(resp))
     if got is None:
         cut = " (it ran out of room)" if resp.get("stop_reason") == "max_tokens" else ""
         raise RuntimeError(f"its answer wasn't in the expected shape{cut}.")
@@ -245,18 +261,25 @@ def parse_sources(resp: dict) -> list:
     return sources[:6]
 
 
+def _describe(resp: dict) -> dict:
+    """What came back, for the log when it couldn't be read: no readings, just the shape."""
+    return {"stop_reason": resp.get("stop_reason"),
+            "blocks": [b.get("type") for b in resp.get("content", [])][:40],
+            "text_end": _text(resp)[-600:]}
+
+
 def _work(f: dict, fp: str, lens: str = "ai") -> None:
     try:
         key = (security.get(KEY_REF) or {}).get("key")
         body = {"model": MODEL, "max_tokens": 4000, "system": SYSTEM,
-                "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": SEARCHES}],
+                "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": SEARCHES}, WRITE_TOOL],
                 "messages": [{"role": "user", "content": "Today's readings:\n" + json.dumps(f, default=str)}]}
         try:
             resp = _post(body, key)
         except RuntimeError as e:
             if "error 400" not in str(e):
                 raise
-            body.pop("tools")              # web search not available on this key: write from the readings
+            body["tools"] = [WRITE_TOOL]   # web search not available on this key: write from the readings
             resp = _post(body, key)
         content = []                       # everything Claude has said so far, across pauses
         for _ in range(4):                 # a long search can pause part-way: let it carry on
@@ -268,14 +291,20 @@ def _work(f: dict, fp: str, lens: str = "ai") -> None:
         whole = dict(resp, content=content)
         try:
             out = parse(whole)
-        except RuntimeError:               # no JSON at the end: ask once for just the JSON
-            body.pop("tools", None)
+        except RuntimeError:               # no answer handed over: ask once, and make it use the tool
+            db.log("briefing.reply", _describe(whole))
+            body["tools"] = [WRITE_TOOL]
+            body["tool_choice"] = {"type": "tool", "name": WRITE_TOOL["name"]}
             body["messages"] = body["messages"][:1] + [
                 {"role": "assistant", "content": _text(whole).strip() or "(no text)"},
-                {"role": "user", "content": "Now give only the final JSON object described in your "
-                                            "instructions, with the three paragraphs and the headline. Nothing else."}]
+                {"role": "user", "content": "Now hand over the finished big picture with the "
+                                            "write_big_picture tool."}]
             again = _post(body, key)
-            out = parse(again)
+            try:
+                out = parse(again)
+            except RuntimeError:
+                db.log("briefing.reply", _describe(again))
+                raise
             out["sources"] = parse_sources(whole) or out["sources"]
         _save(lens, dict(out, fingerprint=fp, written_at=db.now(), error="", failed_at=None))
     except Exception as e:
