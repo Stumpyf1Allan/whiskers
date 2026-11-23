@@ -202,18 +202,39 @@ def _post(body: dict, key: str) -> dict:
         raise RuntimeError(f"couldn't reach Anthropic ({getattr(e, 'reason', e)})") from None
 
 
+def _json_in(text: str) -> dict | None:
+    """The last JSON object in the text that has the three paragraphs, or None."""
+    text = re.sub(r"```(?:json)?", "", text)
+    dec = json.JSONDecoder()
+    found = None
+    for m in re.finditer(r"\{", text):
+        try:
+            got, _ = dec.raw_decode(text[m.start():])
+        except ValueError:
+            continue
+        if isinstance(got, dict) and any(k in got for k in ("theme", "markets", "portfolio")):
+            found = got
+    return found
+
+
+def _text(resp: dict) -> str:
+    return "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+
+
 def parse(resp: dict) -> dict:
     """The three paragraphs and the sources Claude used."""
-    text = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
-    start, end = text.rfind('{"headline"'), text.rfind("}")
-    if start < 0:
-        start = text.find("{")
-    if start < 0 or end <= start:
-        raise RuntimeError("its answer wasn't in the expected shape.")
-    got = json.loads(text[start:end + 1])
+    got = _json_in(_text(resp))
+    if got is None:
+        cut = " (it ran out of room)" if resp.get("stop_reason") == "max_tokens" else ""
+        raise RuntimeError(f"its answer wasn't in the expected shape{cut}.")
     out = {k: re.sub(r"\s+", " ", str(got.get(k) or "")).strip() for k in ("headline", "theme", "markets", "portfolio")}
     if not (out["theme"] and out["markets"] and out["portfolio"]):
         raise RuntimeError("its answer was missing a paragraph.")
+    out["sources"] = parse_sources(resp)
+    return out
+
+
+def parse_sources(resp: dict) -> list:
     sources, seen = [], set()
     for b in resp.get("content", []):
         for c in b.get("citations") or []:
@@ -221,14 +242,13 @@ def parse(resp: dict) -> dict:
             if url and url.startswith("https://") and url not in seen:
                 seen.add(url)
                 sources.append({"url": url, "title": (c.get("title") or url)[:120]})
-    out["sources"] = sources[:6]
-    return out
+    return sources[:6]
 
 
 def _work(f: dict, fp: str, lens: str = "ai") -> None:
     try:
         key = (security.get(KEY_REF) or {}).get("key")
-        body = {"model": MODEL, "max_tokens": 2000, "system": SYSTEM,
+        body = {"model": MODEL, "max_tokens": 4000, "system": SYSTEM,
                 "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": SEARCHES}],
                 "messages": [{"role": "user", "content": "Today's readings:\n" + json.dumps(f, default=str)}]}
         try:
@@ -238,12 +258,25 @@ def _work(f: dict, fp: str, lens: str = "ai") -> None:
                 raise
             body.pop("tools")              # web search not available on this key: write from the readings
             resp = _post(body, key)
-        for _ in range(3):                 # a long search can pause part-way: let it carry on
+        content = []                       # everything Claude has said so far, across pauses
+        for _ in range(4):                 # a long search can pause part-way: let it carry on
+            content += resp.get("content", [])
             if resp.get("stop_reason") != "pause_turn":
                 break
-            body["messages"] = body["messages"][:1] + [{"role": "assistant", "content": resp["content"]}]
+            body["messages"] = body["messages"][:1] + [{"role": "assistant", "content": content}]
             resp = _post(body, key)
-        out = parse(resp)
+        whole = dict(resp, content=content)
+        try:
+            out = parse(whole)
+        except RuntimeError:               # no JSON at the end: ask once for just the JSON
+            body.pop("tools", None)
+            body["messages"] = body["messages"][:1] + [
+                {"role": "assistant", "content": _text(whole).strip() or "(no text)"},
+                {"role": "user", "content": "Now give only the final JSON object described in your "
+                                            "instructions, with the three paragraphs and the headline. Nothing else."}]
+            again = _post(body, key)
+            out = parse(again)
+            out["sources"] = parse_sources(whole) or out["sources"]
         _save(lens, dict(out, fingerprint=fp, written_at=db.now(), error="", failed_at=None))
     except Exception as e:
         old = _load(lens)

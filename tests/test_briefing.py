@@ -55,3 +55,41 @@ def test_parse_takes_the_last_json_and_the_sources():
 def test_parse_refuses_a_missing_paragraph():
     with pytest.raises(RuntimeError):
         briefing.parse({"content": [{"type": "text", "text": '{"headline": "x", "theme": "A."}'}]})
+
+
+def _resp(*texts, stop="end_turn"):
+    return {"stop_reason": stop, "content": [{"type": "text", "text": t} for t in texts]}
+
+
+def test_parse_finds_json_after_prose_split_across_blocks():
+    j = '{"headline": "H", "theme": "T", "markets": "M", "portfolio": "P"}'
+    out = briefing.parse(_resp("Some notes {not json} here.\n", j[:30], j[30:]))
+    assert out["theme"] == "T" and out["headline"] == "H"
+
+
+def test_parse_handles_fences_and_spaces():
+    out = briefing.parse(_resp('```json\n{ "headline": "H",\n "theme": "T", "markets": "M", "portfolio": "P" }\n```'))
+    assert out["portfolio"] == "P"
+
+
+def test_parse_says_when_cut_off():
+    import pytest
+    with pytest.raises(RuntimeError, match="ran out of room"):
+        briefing.parse(_resp('{"headline": "H", "theme": "T', stop="max_tokens"))
+
+
+def test_work_asks_again_for_just_the_json(monkeypatch):
+    calls = []
+    replies = [_resp("Searching done, here is my story but no JSON.", stop="pause_turn"),
+               _resp("Still no JSON."),
+               _resp('{"headline": "H", "theme": "T", "markets": "M", "portfolio": "P"}')]
+
+    def fake_post(body, key):
+        calls.append(body)
+        return replies[len(calls) - 1]
+
+    monkeypatch.setattr(briefing, "_post", fake_post)
+    monkeypatch.setattr(briefing.security, "get", lambda ref: {"key": "k"})
+    briefing._work(_facts(), "fp", "ai")
+    assert len(calls) == 3 and "tools" not in calls[2]
+    assert briefing.state("ai")["text"]["theme"] == "T"
