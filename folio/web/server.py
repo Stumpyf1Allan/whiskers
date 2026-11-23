@@ -22,7 +22,7 @@ import unicodedata
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .. import android, config, db, inbox, net, security, sync, updates
+from .. import android, config, db, inbox, net, security, selfupdate, sync, updates
 from ..brokers import freetrade, monzo, symbols, trading212
 from ..engine import (allocation, export, isa, lens, mathx, narrative, plan, playbook, portfolio, rules, sample,
                       sections, signals, stress, themes)
@@ -586,7 +586,7 @@ def api_settings(req, m, q, body):
 
 
 SETTABLE = {"user_name", "isa_allowance", "fscs_limit", "refresh_on_open", "stooq_key",
-            "check_for_updates", "auto_download_updates", "update_url", "toured", "theme",
+            "check_for_updates", "auto_download_updates", "auto_install_updates", "update_url", "toured", "theme",
             "hide_amounts", "show_mortgage", "show_retirement", "show_news", "reminder_day",
             "reminder_on", "statements_folder", "text_size"}
 
@@ -1072,6 +1072,16 @@ def api_update_download(req, m, q, body):
     return updates.state()
 
 
+@route("POST", "/api/update/install")
+def api_update_install(req, m, q, body):
+    """Windows only: download if needed, verify, replace this exe, restart. The paths
+    are the app's own; nothing from the page is used."""
+    if not selfupdate.can_install():
+        raise ApiError("This copy can't update itself. Use “Show the new version”.")
+    selfupdate.start()
+    return updates.state()
+
+
 @route("POST", "/api/update/dismiss")
 def api_update_dismiss(req, m, q, body):
     updates.dismiss((body or {}).get("version"))
@@ -1287,6 +1297,8 @@ class Handler(BaseHTTPRequestHandler):
     def _dispatch(self, method: str):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+        if method != "GET" and not path.startswith("/api/update"):
+            selfupdate.note_activity()
         q = {k: v[0] for k, v in urllib.parse.parse_qs(parsed.query).items()}
         # The link in Monzo's sign-in email is always a cross-site navigation, so this one
         # address skips the same-site check; the one-time state it must carry is the guard.

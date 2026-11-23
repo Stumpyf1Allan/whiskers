@@ -10,8 +10,9 @@ module goes exactly as far as it safely can and then stops:
     fetch  →  download it and verify its SHA-256 against the manifest
     stop   →  hand them the verified file and let them run it
 
-Nothing here ever replaces a running program, and nothing downloaded is ever
-executed by the app. The checksum is the whole point of the exercise: it is what
+Nothing in this module ever replaces a running program or executes anything it
+downloaded. (The Windows "Update now" button goes one step further, in
+`selfupdate.py`, using only a file verified here.) The checksum is the whole point of the exercise: it is what
 makes "this 40 MB file came off the internet" into "this is byte-for-byte the file
 that was published".
 """
@@ -34,7 +35,7 @@ import urllib.request
 from . import config
 
 #: How long between automatic checks. A household app does not need to ask hourly.
-CHECK_INTERVAL = 60 * 60 * 20        # 20 hours
+CHECK_INTERVAL = 60 * 60 * 3         # 3 hours
 #: After a failed check. A laptop opened on a train is offline for minutes, not a
 #: day, and making it wait out the full interval means it never notices the update.
 RETRY_INTERVAL = 60 * 30             # 30 minutes
@@ -242,6 +243,9 @@ def state() -> dict:
     out["enabled"] = bool(config.settings.get("check_for_updates", True))
     out["configured"] = bool(manifest_url())
     out["frozen"] = _is_frozen()
+    # True on a Windows copy built as one .exe: the bar then offers "Update now".
+    out["can_install"] = platform_key() == "windows" and _is_frozen()
+    out["auto_install"] = out["can_install"] and bool(config.settings.get("auto_install_updates", True))
     if not out["configured"]:
         out["status"] = "off"
     # The banner is the one thing the front end should not have to reason about.
