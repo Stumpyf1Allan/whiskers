@@ -64,6 +64,12 @@ WHISKERS_DATA_DIR=/tmp/w WHISKERS_FAKE_MARKET=1 python run_whiskers.py --no-wind
 - In Claude's cloud sandbox, Playwright's Chromium is at `/opt/pw-browsers`. Stop a background
   server with the task tool, not `pkill -f` on a pattern that is also in your own command.
 - Bandit: `bandit -c bandit.yaml -r .` should report nothing.
+- Release and phone builds install only `requirements-lock.txt`, every file checked by sha256
+  (`pip install --require-hashes`). `requirements.txt` and `requirements-dev.txt` stay the
+  readable lists. After changing either, or to take newer versions, remake the lock with
+  `uv pip compile requirements-dev.txt --universal --python-version 3.12 --generate-hashes
+  --no-header --annotation-style line -o requirements-lock.txt` (add `--upgrade` for newer
+  versions) and run the tests from a fresh venv installed from it.
 
 ## Conventions
 

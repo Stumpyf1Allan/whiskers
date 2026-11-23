@@ -56,26 +56,25 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       signed: ${{ steps.key.outputs.signed }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       # Chaquopy compiles the app's Python with a Python of the same version as the
       # phone's (3.13), so this one is used for the tests too.
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.13'
 
       - name: Run every test first
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install pytest PyYAML "openpyxl>=3.1" "cryptography>=41"
+          python -m pip install --require-hashes -r requirements-lock.txt
           python -X warn_default_encoding -m pytest tests -q
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
         with:
           gradle-version: '8.14.3'
 
@@ -143,7 +142,7 @@ jobs:
             echo "Signed with the Whiskers key: $SIGNED"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: apks
           path: out/
@@ -161,9 +160,9 @@ jobs:
     permissions:
       contents: write          # to leave the screenshots on the draft release below
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: apks
           path: apks
@@ -175,7 +174,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Run the app
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 34
           target: google_apis
@@ -224,9 +223,9 @@ jobs:
       group: android-publish
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: apks
           path: apks
