@@ -656,6 +656,7 @@ async function loadBriefing(refresh) {
     : r.written_at ? `Written ${ago(r.written_at)}` : '';
   if (upd && r.problem && !r.text && !r.writing)
     upd.insertAdjacentHTML('beforeend', ' <button class="btn small" data-act="brief-rewrite">Try again</button>');
+  wire($('#bigpic'));
   S.briefTimer = setTimeout(() => loadBriefing(false), r.writing ? 5000 : 30 * 60 * 1000);
 }
 document.addEventListener('whiskers:rendered', () => {

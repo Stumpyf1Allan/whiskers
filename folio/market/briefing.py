@@ -302,9 +302,11 @@ def _work(f: dict, fp: str, lens: str = "ai") -> None:
             again = _post(body, key)
             try:
                 out = parse(again)
-            except RuntimeError:
-                db.log("briefing.reply", _describe(again))
-                raise
+            except RuntimeError as e:
+                d = _describe(again)
+                db.log("briefing.reply", d)
+                raise RuntimeError(f"{e} (Claude stopped with {d['stop_reason']}; "
+                                   f"sent {', '.join(d['blocks']) or 'nothing'})") from None
             out["sources"] = parse_sources(whole) or out["sources"]
         _save(lens, dict(out, fingerprint=fp, written_at=db.now(), error="", failed_at=None))
     except Exception as e:
