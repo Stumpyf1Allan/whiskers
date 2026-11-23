@@ -1,0 +1,106 @@
+# Once a month, remake requirements-lock.txt with the newest versions of every package,
+# run the tests from a fresh install of it, and open a pull request for Allan to review.
+#
+# NOTHING MERGES BY ITSELF. This workflow only ever pushes to its own deps/relock-* branch
+# and opens a PR into main. Releases and phone builds keep using the old lock until you
+# merge the PR yourself — and even then nothing reaches the family until you cut a release.
+#
+# ONE-OFF SETUP: Settings -> Actions -> General -> Workflow permissions ->
+# tick "Allow GitHub Actions to create and approve pull requests".
+#
+# RUN IT NOW: Actions -> Update locked packages -> Run workflow.
+
+name: Update locked packages
+
+on:
+  schedule:
+    - cron: '17 6 1 * *'   # 06:17 UTC on the 1st of each month
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: relock
+  cancel-in-progress: false
+
+jobs:
+  relock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          version: '0.11.32'
+
+      # The same command CLAUDE.md gives, with --upgrade.
+      - name: Remake the lock
+        run: >
+          uv pip compile requirements-dev.txt --universal --python-version 3.12
+          --generate-hashes --no-header --annotation-style line --upgrade
+          -o requirements-lock.txt
+
+      - name: See what changed
+        id: diff
+        run: |
+          if git diff --quiet -- requirements-lock.txt; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing newer this month."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff -U0 -- requirements-lock.txt | grep -E '^[-+][A-Za-z0-9_.-]+==' \
+              | sed -E 's/ .*//' > /tmp/changes.txt
+            cat /tmp/changes.txt
+          fi
+
+      # Fresh venv, hash-checked install, full tests — as CLAUDE.md asks.
+      - name: Test from a fresh install of the new lock
+        id: tests
+        if: steps.diff.outputs.changed == 'true'
+        continue-on-error: true
+        run: |
+          python -m venv /tmp/v
+          /tmp/v/bin/python -m pip install --require-hashes -r requirements-lock.txt
+          /tmp/v/bin/python -X warn_default_encoding -m pytest tests -q
+
+      - name: Open a pull request
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TESTS: ${{ steps.tests.outcome }}
+        run: |
+          branch="deps/relock-$(date -u +%Y-%m)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add requirements-lock.txt
+          git commit -q -m "Update locked packages ($(date -u +%B\ %Y))"
+          git push --force origin "$branch"
+
+          if [ "$TESTS" = "success" ]; then result="✅ Tests passed on Linux from a fresh, hash-checked install."
+          else result="❌ **Tests failed** on Linux — open the workflow run to see why before merging."; fi
+          {
+            echo "Monthly refresh of \`requirements-lock.txt\`."
+            echo
+            echo "$result"
+            echo
+            echo "Changed (– old, + new):"
+            echo '```'
+            cat /tmp/changes.txt
+            echo '```'
+            echo
+            echo "Nothing reaches the family's copies until this is merged **and** a release is published."
+          } > /tmp/body.md
+
+          if gh pr view "$branch" --json state -q .state 2>/dev/null | grep -q OPEN; then
+            gh pr edit "$branch" --body-file /tmp/body.md
+          else
+            gh pr create --base main --head "$branch" \
+              --title "Update locked packages ($(date -u +%B\ %Y))" --body-file /tmp/body.md
+          fi
