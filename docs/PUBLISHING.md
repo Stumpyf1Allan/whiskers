@@ -160,7 +160,15 @@ The workflow leaves the release as a **draft**. Nothing has reached anybody yet:
 address baked into every copy out there ignores drafts, so until you do this step the
 family are still being pointed at the previous release.
 
-**Releases** → open the draft → read the description → **Publish release**.
+**Releases** → open the draft → read the description → download **latest.json** →
+on your PC run `python tools/sign_update.py sign latest.json` (it asks for the signing
+key's passphrase and writes `latest.json.sig`) → **Edit** the draft → drag
+`latest.json.sig` onto it → **Publish release**.
+
+From 1.4.5 on, Windows and Mac copies ignore any release without a valid
+`latest.json.sig`. The signing key is only on your PC, so nobody who gets into GitHub can
+send out an update. Publishing pushes the tag, which starts the workflow again; that run
+sees the release is published and stops without rebuilding.
 
 ### Step 4. Check it worked, once
 

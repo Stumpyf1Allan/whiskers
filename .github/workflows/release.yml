@@ -52,6 +52,7 @@ jobs:
     outputs:
       tag: ${{ steps.v.outputs.tag }}
       version: ${{ steps.v.outputs.version }}
+      published: ${{ steps.p.outputs.published }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -87,10 +88,28 @@ jobs:
           fi
           echo "Version $have — matches."
 
+      - id: p
+        name: Leave a published release alone
+        # Publishing creates the tag, and the tag starts this workflow again. Rebuilding
+        # then would replace the exe and latest.json under a release people are already
+        # downloading, and break latest.json.sig (signed on the owner's PC). So stop.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo none)
+          if [ "$draft" = "false" ]; then
+            echo "::notice::$TAG is already published. Nothing to build."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # ---------------------------------------------------------------- 2. Windows
   windows:
     name: Windows
     needs: check
+    if: needs.check.outputs.published != 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -135,6 +154,7 @@ jobs:
   macos:
     name: macOS (${{ matrix.label }})
     needs: check
+    if: needs.check.outputs.published != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -199,6 +219,7 @@ jobs:
   release:
     name: Draft the release
     needs: [check, windows, macos]
+    if: needs.check.outputs.published != 'true'
     runs-on: ubuntu-latest
     # Waits for the owner's approval (Settings > Environments > release) before it
     # touches a release, so a stray tag or a stolen token can't replace the exe.
@@ -296,6 +317,8 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists — replacing its files."
             gh release upload "$TAG" "${assets[@]}" --clobber
+            # A signature made for the old latest.json would not match the new one.
+            gh release delete-asset "$TAG" latest.json.sig --yes 2>/dev/null || true
           else
             # --target pins the release to the exact commit these files were built
             # from. Without it the tag is created against whatever the default branch
@@ -320,8 +343,12 @@ jobs:
             echo "It is a **draft**. Nobody can see it and no existing copy will notice it"
             echo "until you publish it."
             echo
-            echo "1. Go to **Releases** and open the draft."
-            echo "2. Read the description, then press **Publish release**."
+            echo "1. Go to **Releases** and open the draft. Download **latest.json**."
+            echo "2. On your PC: \`python tools/sign_update.py sign latest.json\`"
+            echo "3. Edit the draft and attach the new **latest.json.sig**."
+            echo "4. Read the description, then press **Publish release**."
+            echo
+            echo "Without latest.json.sig, copies from 1.4.5 on will ignore this release."
             echo
             echo "Then check it worked:"
             echo '```'
