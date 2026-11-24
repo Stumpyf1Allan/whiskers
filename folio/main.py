@@ -116,7 +116,8 @@ def run(open_ui: bool = True, port: int | None = None, prefer: str = "auto"):
     logfile = _setup_logging(bool(os.environ.get("WHISKERS_VERBOSE")))
     logging.info("%s %s starting", config.APP_NAME, config.APP_VERSION)
     httpd, port = server.serve(port=port, block=False)
-    url = f"http://127.0.0.1:{port}/"
+    server.KEY_REQUIRED = True
+    url = f"http://127.0.0.1:{port}/#key={config.phone_key()}"
     _startup_jobs()
     print(f"\n  {config.APP_NAME} {config.APP_VERSION} — {config.APP_TAGLINE}")
     print(f"  Open:  {url}")

@@ -118,6 +118,9 @@ def digest_of(path: pathlib.Path) -> str:
 README_NAME = "Read me.txt"
 
 
+MAX_FILE_BYTES = 25 * 1024 * 1024    # the same limit as the Import screen's upload
+
+
 def waiting() -> list[pathlib.Path]:
     """Files to read: never the folder's own Read me, nor the hidden and half-written files
     other programs leave about (Excel's "~$" lock files, a download's ".part")."""
@@ -149,6 +152,15 @@ def import_waiting() -> dict:
     today = dt.date.today()
     plats = db.rows("SELECT id, name, provider, institution FROM platforms WHERE provider NOT IN ('card')")
     for path in waiting():
+        try:
+            too_big = path.stat().st_size > MAX_FILE_BYTES
+        except OSError:
+            too_big = False
+        if too_big:
+            # The Import screen refuses anything over 25 MB; a file dropped in the folder
+            # gets the same limit, so one huge spreadsheet can't stall every Refresh.
+            left.append({"file": path.name, "why": "Too big to read (over 25 MB). Is it the right file?"})
+            continue
         try:
             digest = digest_of(path)
         except OSError as e:

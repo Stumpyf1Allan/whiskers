@@ -811,3 +811,14 @@ def test_a_step_taken_can_move_the_targets_too(server):
     assert out["moved"] == {"points": 10.0, "from": "Technology & AI", "to": "Cash"}
     assert _targets() == {"Technology & AI": 20, "Core": 60, "Cash": 20}
     assert str(rid) in rules.steps_done()
+
+
+def test_the_statements_folder_skips_a_file_too_big_to_read(tmp_path, monkeypatch):
+    folder = tmp_path / "statements"
+    config.settings.update({"statements_folder": str(folder)})
+    inbox.folder()
+    monkeypatch.setattr(inbox, "MAX_FILE_BYTES", 10)
+    (folder / "huge holdings.csv").write_bytes(inv.sample_holdings_csv())
+    out = inbox.import_waiting()
+    assert [x["file"] for x in out["left"]] == ["huge holdings.csv"] and "Too big" in out["left"][0]["why"]
+    assert (folder / "huge holdings.csv").exists()
