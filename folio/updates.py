@@ -19,6 +19,8 @@ that was published".
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -44,6 +46,9 @@ TIMEOUT = 12.0
 DOWNLOAD_TIMEOUT = 300.0
 #: A manifest is a few hundred bytes. Anything vastly larger is not our manifest.
 MAX_MANIFEST_BYTES = 256 * 1024
+#: latest.json's signature sits beside it as latest.json.sig: one line of base64.
+SIG_SUFFIX = ".sig"
+MAX_SIG_BYTES = 4096
 #: Sanity ceiling on a download, so a wrong URL cannot fill somebody's disk.
 MAX_DOWNLOAD_BYTES = 400 * 1024 * 1024
 
@@ -295,17 +300,66 @@ def _host_allowed(download_url: str, manifest: str) -> bool:
     return any(host == h or host.endswith("." + h) for h in ALLOWED_DOWNLOAD_HOSTS)
 
 
+def needs_signature() -> bool:
+    """Windows and Mac copies only trust a signed manifest. The phone does not need one:
+    Android itself refuses an update not signed with the app's own key."""
+    return not config.android()
+
+
+def signature_ok(raw: bytes, sig_text: bytes) -> bool:
+    """Is `sig_text` (base64 Ed25519) a signature of exactly `raw` by one of our keys?"""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    try:
+        sig = base64.b64decode(sig_text.strip(), validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    for key in config.UPDATE_PUBLIC_KEYS:
+        try:
+            Ed25519PublicKey.from_public_bytes(bytes.fromhex(key)).verify(sig, raw)
+            return True
+        except (InvalidSignature, ValueError):
+            continue
+    return False
+
+
+def _check_signature(url: str, raw: bytes):
+    """The manifest names the files and their checksums, so it is the thing an attacker
+    would change. The signature is made on the owner's PC, never on GitHub, so taking
+    over the GitHub account or a release run is not enough to send out a new exe."""
+    unsigned = ("This update isn't signed with Whiskers' key, so it was ignored. "
+                "Nothing was installed.")
+    sig = _fetch(url + SIG_SUFFIX, MAX_SIG_BYTES, missing=unsigned)
+    if len(sig) > MAX_SIG_BYTES or not signature_ok(raw, sig):
+        raise UpdateError(unsigned)
+
+
 def _read_manifest(url: str) -> dict:
+    raw = _fetch(url, MAX_MANIFEST_BYTES)
+    if len(raw) > MAX_MANIFEST_BYTES:
+        raise UpdateError("That address didn't return an update file.")
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except Exception as e:
+        raise UpdateError("That address didn't return an update file.") from e
+    if not isinstance(data, dict) or not data.get("version"):
+        raise UpdateError("The update file is missing a version number.")
+    if needs_signature():
+        _check_signature(url, raw)
+    return data
+
+
+def _fetch(url: str, limit: int, missing: str = "") -> bytes:
     try:
         with _open(url, TIMEOUT) as r:
-            raw = r.read(MAX_MANIFEST_BYTES + 1)
+            return r.read(limit + 1)
     except urllib.error.HTTPError as e:
         # Only 404 means "there is nothing there". 403 used to be lumped in with it,
         # and 403 is also exactly what a workplace proxy or a captive portal returns —
         # so somebody on a blocked network was told no version had ever been published,
         # which is a statement about the publisher rather than about their wifi.
         if e.code == 404:
-            raise UpdateError("Nothing has been published at that address yet.") from e
+            raise UpdateError(missing or "Nothing has been published at that address yet.") from e
         if e.code in (401, 403, 407):
             raise UpdateError("The update server refused the request — some networks "
                               "block it. Try again on another connection.") from e
@@ -316,15 +370,6 @@ def _read_manifest(url: str) -> dict:
         raise
     except Exception as e:                                   # timeouts, DNS, TLS
         raise UpdateError(f"Couldn't reach the update server: {e}") from e
-    if len(raw) > MAX_MANIFEST_BYTES:
-        raise UpdateError("That address didn't return an update file.")
-    try:
-        data = json.loads(raw.decode("utf-8"))
-    except Exception as e:
-        raise UpdateError("That address didn't return an update file.") from e
-    if not isinstance(data, dict) or not data.get("version"):
-        raise UpdateError("The update file is missing a version number.")
-    return data
 
 
 def _download_entry(manifest: dict, url: str) -> dict | None:

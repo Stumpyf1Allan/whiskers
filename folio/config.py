@@ -34,6 +34,15 @@ UPDATE_MANIFEST_URL = (
     "https://github.com/Stumpyf1Allan/whiskers"
     "/releases/latest/download/latest.json")
 
+#: The public half of the key that signs latest.json (Ed25519, 64 hex characters). The
+#: private half lives only on the owner's PC; `tools/sign_update.py` makes the key and the
+#: signature. A Windows or Mac copy ignores a manifest without a valid `latest.json.sig`
+#: from one of these keys. More than one is allowed, so a new key can be added a release
+#: before the old one is retired. A test fails if this is ever empty.
+UPDATE_PUBLIC_KEYS: tuple[str, ...] = (
+    "198ec7e487f4bf2a3baa484744078cb182c97b3084b587d9164a6360a98a27d8",  # Nov 2026
+)
+
 #: Where the Android app looks instead: a pre-release tagged "android" that the Android
 #: workflow refreshes after every phone build. Kept apart from latest.json so the family's
 #: Windows and Mac copies never see a phone build, and the phone never sees theirs.

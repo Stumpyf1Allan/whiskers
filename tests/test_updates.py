@@ -38,6 +38,21 @@ SHIPPED_MANIFEST_URL = config.UPDATE_MANIFEST_URL
 PAYLOAD = b"not really an executable, but it hashes the same way" * 500
 DIGEST = hashlib.sha256(PAYLOAD).hexdigest()
 
+#: A throwaway signing key, standing in for the owner's. Each test's manifest is signed
+#: with it, and copies are told to trust only it.
+from cryptography.hazmat.primitives import serialization  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
+TEST_KEY = Ed25519PrivateKey.generate()
+TEST_PUB = TEST_KEY.public_key().public_bytes(
+    serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
+
+
+def sign_file(path: pathlib.Path, key=TEST_KEY):
+    import base64
+    sig = path.with_name(path.name + updates.SIG_SUFFIX)
+    sig.write_bytes(base64.b64encode(key.sign(path.read_bytes())) + b"\n")
+    return sig
+
 
 @pytest.fixture(autouse=True)
 def never_the_real_internet(monkeypatch):
@@ -80,6 +95,7 @@ def host(monkeypatch, tmp_path):
             timeout=timeout)
 
     monkeypatch.setattr(updates, "_open", transport)
+    monkeypatch.setattr(config, "UPDATE_PUBLIC_KEYS", (TEST_PUB,))
     # Each test starts from a clean slate rather than inheriting the last one's verdict.
     monkeypatch.setattr(updates, "_STATE", dict(updates._STATE, checked_at=None,
                                                 latest=None, download=None, file=None,
@@ -103,6 +119,7 @@ def host(monkeypatch, tmp_path):
                      "sha256": DIGEST, "bytes": len(PAYLOAD)}}}
             m.update(over)
             (served / "latest.json").write_text(json.dumps(m), encoding="utf-8")
+            sign_file(served / "latest.json")
             return m
 
         def entry(self, **over):
@@ -415,14 +432,15 @@ class TestManners:
         import urllib.request
 
         host.publish()
-        real = f"http://127.0.0.1:{host.url.rsplit(':', 1)[1]}/latest.json"
+        real = f"http://127.0.0.1:{host.url.rsplit(':', 1)[1]}/"
         hops = []
 
         class Bounce(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
                 hops.append(self.path)
                 self.send_response(302)
-                self.send_header("Location", real)
+                # Like GitHub: latest.json and latest.json.sig each go to their own file.
+                self.send_header("Location", real + self.path.rsplit("/", 1)[-1])
                 self.send_header("Content-Length", "0")
                 self.end_headers()
 
@@ -867,3 +885,76 @@ def test_the_banner_shows_the_download_as_it_goes():
     assert "Downloading Whiskers" in banner and "u.progress" in banner
     assert "setTimeout(checkUpdateBanner, 1000)" in banner, "it should look again every second"
     assert "data-act=\"upd-install\"" in banner
+
+
+# ===========================================================================
+# Signed manifests (1.4.5): only latest.json signed on the owner's PC is trusted
+# ===========================================================================
+
+class TestSignedManifest:
+
+    def _check(self):
+        st = updates.check(force=True)
+        return st, updates._STATE.get("download")
+
+    def test_a_signed_manifest_is_accepted(self, host):
+        host.publish()
+        st, dl = self._check()
+        assert st["status"] == "available" and dl
+
+    def test_no_signature_means_no_update(self, host):
+        host.publish()
+        (host.dir / "latest.json.sig").unlink()
+        st, dl = self._check()
+        assert st["status"] == "error" and "isn't signed" in st["last_error"]
+        assert dl is None
+
+    def test_a_signature_from_another_key_is_refused(self, host):
+        host.publish()
+        sign_file(host.dir / "latest.json", key=Ed25519PrivateKey.generate())
+        st, _ = self._check()
+        assert st["status"] == "error" and "isn't signed" in st["last_error"]
+
+    def test_a_manifest_changed_after_signing_is_refused(self, host):
+        host.publish()
+        m = host.dir / "latest.json"
+        m.write_text(m.read_text().replace(DIGEST, "0" * 64), encoding="utf-8")
+        st, dl = self._check()
+        assert st["status"] == "error" and dl is None
+
+    def test_garbage_in_the_signature_file_is_refused(self, host):
+        host.publish()
+        (host.dir / "latest.json.sig").write_text("not base64 at all!", encoding="utf-8")
+        st, _ = self._check()
+        assert st["status"] == "error"
+
+    def test_a_second_key_can_be_added_for_a_change_of_key(self, host, monkeypatch):
+        new = Ed25519PrivateKey.generate()
+        new_pub = new.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
+        monkeypatch.setattr(config, "UPDATE_PUBLIC_KEYS", (TEST_PUB, new_pub))
+        host.publish()
+        sign_file(host.dir / "latest.json", key=new)
+        st, _ = self._check()
+        assert st["status"] == "available"
+
+    def test_the_phone_relies_on_android_signing_instead(self, host, monkeypatch):
+        host.publish()
+        (host.dir / "latest.json.sig").unlink()
+        monkeypatch.setattr(config, "android", lambda: True)
+        assert updates._read_manifest(f"{host.url}/latest.json")["version"] == "9.9.9"
+
+
+def test_the_release_key_is_built_in():
+    # Shipped empty, every Windows and Mac copy would refuse every update from then on.
+    keys = config.UPDATE_PUBLIC_KEYS
+    assert keys, "folio/config.py UPDATE_PUBLIC_KEYS is empty"
+    for k in keys:
+        assert len(k) == 64 and all(c in "0123456789abcdef" for c in k), k
+
+
+def test_the_follow_up_release_run_leaves_a_published_release_alone():
+    wf = (pathlib.Path(__file__).resolve().parent.parent
+          / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert wf.count("if: needs.check.outputs.published != 'true'") == 3
+    assert "delete-asset \"$TAG\" latest.json.sig" in wf
