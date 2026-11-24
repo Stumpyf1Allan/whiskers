@@ -1128,6 +1128,14 @@ def test_a_plan_replaces_a_templates_leftover_sleeves_and_says_so():
     assert db.get_meta("plan_loaded")["at"]
 
 
+def test_the_desktop_app_answers_only_the_page_it_opened(server, monkeypatch):
+    from folio.web import server as srv
+    monkeypatch.setattr(srv, "KEY_REQUIRED", True)
+    assert _req(server, "/api/bootstrap")[0] == 401                      # another program here
+    assert _req(server, "/api/bootstrap", headers={"X-Whiskers-Key": config.phone_key()})[0] == 200
+    assert _req(server, "/")[0] == 200
+
+
 # ============================================================================ the phone
 
 def test_on_a_phone_the_api_answers_only_its_own_browser(server, monkeypatch):

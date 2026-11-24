@@ -1306,10 +1306,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._monzo_callback(q)
         if not self._host_ok() or not self._origin_ok(method):
             return self._json({"error": f"{config.APP_NAME} only answers this computer."}, 403)
-        if config.phone_mode() and path.startswith("/api/") and not hmac.compare_digest(
+        if (config.phone_mode() or KEY_REQUIRED) and path.startswith("/api/") and not hmac.compare_digest(
                 (self.headers.get("X-Whiskers-Key") or "").encode(), config.phone_key().encode()):
             return self._json({"error": "Open Whiskers from its own start-up link: on a phone, "
-                                        "the app answers only its own browser tab."}, 401)
+                                        "the app answers only its own browser tab."
+                               if config.phone_mode() else
+                               "Close this window and open Whiskers again."}, 401)
         if not path.startswith("/api/"):
             if method not in ("GET", "HEAD"):
                 return self._json({"error": "Not found"}, 404)
@@ -1418,6 +1420,12 @@ def _free_port(preferred: int = config.PREFERRED_PORT) -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+# Set by main.run() for the desktop app: other programs on this computer (or another
+# Windows account on it) share 127.0.0.1, so the API then answers only the page that was
+# opened with this copy's key, as on a phone. Tests and `serve()` on its own leave it off.
+KEY_REQUIRED = False
 
 
 def serve(port: int | None = None, block: bool = True):
